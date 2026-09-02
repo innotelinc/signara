@@ -8,7 +8,7 @@ enterprise-grade infrastructure**.
 Self-hosted by default. Multi-tenant by design. Authentik-native identity. Runs on the
 battle-tested open-source stack of Next.js, NestJS, PostgreSQL, Redis, MinIO, and Meilisearch.
 
-> **Domain:** signara.innotel.us
+> **Repository:** [github.com/innotelinc/signara](https://github.com/innotelinc/signara)
 > **License:** AGPL-3.0-or-later
 
 ---
@@ -59,8 +59,8 @@ battle-tested open-source stack of Next.js, NestJS, PostgreSQL, Redis, MinIO, an
 ```
 signara/
 ├── apps/
-│   ├── web/                    # Next.js frontend (app.signara.innotel.us)
-│   └── api/                    # NestJS backend (api.signara.innotel.us)
+│   ├── web/                    # Next.js frontend (apps/web)
+│   └── api/                    # NestJS backend (apps/api)
 ├── packages/
 │   ├── shared/                 # Shared DTOs, enums, constants
 │   └── database/               # Prisma schema, migrations, seed
@@ -123,8 +123,9 @@ See [docs/Deployment.md](docs/Deployment.md) for ingress, TLS, backups, and HA d
 | [docs/AdministrationGuide.md](docs/AdministrationGuide.md) | Tenant/billing/monitoring admin |
 | [docs/DisasterRecovery.md](docs/DisasterRecovery.md) | RPO/RTO, restore drills, runbooks |
 
-The interactive API reference is served by the API itself:
-`https://api.signara.innotel.us/api/v1/docs` (dev: http://localhost:8000/api/v1/docs).
+The interactive API reference is served by the API itself
+(dev: http://localhost:8000/api/v1/docs); the full OpenAPI 3.1 spec lives in
+[openapi/openapi.yaml](openapi/openapi.yaml).
 
 ## Development
 
@@ -143,7 +144,7 @@ GitHub Actions pipelines run lint, tests, CodeQL + dependency scanning, containe
 
 ## Community & contribution
 
-- Report issues: https://github.com/your-org/signara/issues
+- Report issues: https://github.com/innotelinc/signara/issues
 - Contributing: [CONTRIBUTING.md](CONTRIBUTING.md) (see also [docs/DeveloperGuide.md](docs/DeveloperGuide.md))
 - Code of conduct: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
 
