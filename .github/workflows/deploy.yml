@@ -1,0 +1,64 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        required: true
+        default: production
+        type: choice
+        options: [production, staging]
+      target:
+        description: Deployment strategy
+        required: true
+        default: docker
+        type: choice
+        options: [docker, kubernetes]
+  workflow_run:
+    workflows: [Docker Build & Publish]
+    types: [completed]
+    branches: [main]
+
+concurrency:
+  group: deploy-${{ github.event.inputs.environment || 'production' }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Deploy (${{ github.event.inputs.target || 'docker' }})
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment || 'production' }}
+    if: github.event.workflow_run == null || github.event.workflow_run.conclusion == 'success'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy via Docker Compose (SSH)
+        if: github.event.inputs.target != 'kubernetes' || github.event.inputs.target == null
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            set -e
+            cd /opt/signara
+            git fetch origin main && git reset --hard origin/main
+            cp .env .env.bak || true
+            ./setup.sh
+            docker compose -f docker-compose.prod.yml pull
+            docker compose -f docker-compose.prod.yml up -d --remove-orphans
+            docker image prune -f
+
+      - name: Deploy via kubectl
+        if: github.event.inputs.target == 'kubernetes'
+        env:
+          KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
+        run: |
+          mkdir -p ~/.kube
+          echo "$KUBE_CONFIG" > ~/.kube/config
+          chmod 600 ~/.kube/config
+          kubectl set image deployment/api api=ghcr.io/${{ github.repository_owner }}/signara-api:${{ github.sha }} -n signara
+          kubectl set image deployment/web web=ghcr.io/${{ github.repository_owner }}/signara-web:${{ github.sha }} -n signara
+          kubectl rollout status deployment/api -n signara --timeout=300s
+          kubectl rollout status deployment/web -n signara --timeout=300s

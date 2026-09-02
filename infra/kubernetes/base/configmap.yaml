@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: signara-config
+  namespace: signara
+  labels:
+    app.kubernetes.io/part-of: signara
+data:
+  APP_NAME: "Signara"
+  APP_URL: "https://app.signara.innotel.us"
+  API_URL: "https://api.signara.innotel.us"
+  WEB_URL: "https://app.signara.innotel.us"
+  AUTH_URL: "https://auth.signara.innotel.us"
+  NODE_ENV: "production"
+  API_PORT: "8000"
+  DATABASE_URL: "postgresql://signara:$(SIGNARA_POSTGRES_PASSWORD)@postgres:5432/signara?schema=public"
+  REDIS_URL: "redis://:$(SIGNARA_REDIS_PASSWORD)@redis:6379"
+  S3_ENDPOINT: "http://minio:9000"
+  S3_REGION: "us-east-1"
+  S3_BUCKET: "signara-documents"
+  S3_FORCE_PATH_STYLE: "true"
+  MEILISEARCH_HOST: "http://meilisearch:7700"
+  OIDC_ISSUER_URL: "https://auth.signara.innotel.us/application/o/signara/"
+  OIDC_REDIRECT_URI: "https://app.signara.innotel.us/api/auth/callback"
+  OIDC_SCOPES: "openid profile email groups"
+  IDP_ADMIN_GROUP: "signara-admins"
+  SESSION_COOKIE_SECURE: "true"
+  RATE_LIMIT_WINDOW_MS: "60000"
+  RATE_LIMIT_MAX: "100"

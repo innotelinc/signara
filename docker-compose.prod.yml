@@ -1,0 +1,334 @@
+# ==========================================================================
+# Signara — production stack
+# Assumes TLS termination at a reverse proxy (NGINX Proxy Manager /
+# Kubernetes ingress) in front of the published ports below.
+#
+# Usage:
+#   ./setup.sh
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# Hardening: start with `docker compose -f docker-compose.prod.yml config`
+# to review the effective configuration before deploying.
+# ==========================================================================
+name: signara
+
+x-logging-default: &logging-default
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "10"
+
+services:
+  frontend:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      NEXT_PUBLIC_API_URL: ${API_URL:-https://api.signara.innotel.us}
+      NEXT_PUBLIC_WEB_URL: ${WEB_URL:-https://app.signara.innotel.us}
+    expose:
+      - "3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+      restart_policy:
+        condition: unless-stopped
+    logging: *logging-default
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      API_PORT: 8000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-signara}:${POSTGRES_PASSWORD:-change-me}@postgres:5432/${POSTGRES_DB:-signara}?schema=public
+      REDIS_URL: redis://:${REDIS_PASSWORD:-change-me}@redis:6379
+      S3_ENDPOINT: http://minio:9000
+      MEILISEARCH_HOST: http://meilisearch:7700
+    expose:
+      - "8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      meilisearch:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8000/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+      # Scale API replicas for high availability
+      replicas: ${API_REPLICAS:-2}
+      update_config:
+        order: start-first
+        failure_action: rollback
+        delay: 10s
+      restart_policy:
+        condition: unless-stopped
+    logging: *logging-default
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-signara}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      POSTGRES_DB: ${POSTGRES_DB:-signara}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-signara}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+    logging: *logging-default
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:-change-me}", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-change-me}", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+    logging: *logging-default
+
+  minio:
+    image: minio/minio:RELEASE.2024-09-13T20-26-02Z
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-signara}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-change-me}
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+    logging: *logging-default
+
+  meilisearch:
+    image: getmeili/meilisearch:v1.10
+    restart: unless-stopped
+    environment:
+      MEILI_MASTER_KEY: ${MEILISEARCH_API_KEY:-change-me}
+      MEILI_ENV: production
+      MEILI_NO_ANALYTICS: "true"
+    volumes:
+      - meilidata:/meili_data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7700/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+    logging: *logging-default
+
+  authentik-server:
+    image: ghcr.io/goauthentik/server:2024.8.1
+    restart: unless-stopped
+    command: server
+    environment:
+      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY:-change-me-authentik}
+      AUTHENTIK_ERROR_REPORTING__ENABLED: "false"
+      AUTHENTIK_POSTGRESQL__HOST: authentik-db
+      AUTHENTIK_POSTGRESQL__USER: authentik
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${AUTHENTIK_DB_PASSWORD:-change-me-authentik-db}
+      AUTHENTIK_POSTGRESQL__NAME: authentik
+      AUTHENTIK_REDIS__HOST: authentik-redis
+      AUTHENTIK_BOOTSTRAP_EMAIL: ${AUTHENTIK_BOOTSTRAP_EMAIL:-admin@signara.innotel.us}
+      AUTHENTIK_BOOTSTRAP_PASSWORD: ${AUTHENTIK_BOOTSTRAP_PASSWORD:-change-me}
+    expose:
+      - "9000"
+    volumes:
+      - ./cert:/certs:ro
+    depends_on:
+      authentik-db:
+        condition: service_healthy
+      authentik-redis:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9000/health/live/"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    logging: *logging-default
+
+  authentik-worker:
+    image: ghcr.io/goauthentik/server:2024.8.1
+    restart: unless-stopped
+    command: worker
+    environment:
+      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY:-change-me-authentik}
+      AUTHENTIK_ERROR_REPORTING__ENABLED: "false"
+      AUTHENTIK_POSTGRESQL__HOST: authentik-db
+      AUTHENTIK_POSTGRESQL__USER: authentik
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${AUTHENTIK_DB_PASSWORD:-change-me-authentik-db}
+      AUTHENTIK_POSTGRESQL__NAME: authentik
+      AUTHENTIK_REDIS__HOST: authentik-redis
+    depends_on:
+      authentik-db:
+        condition: service_healthy
+      authentik-redis:
+        condition: service_started
+    logging: *logging-default
+
+  authentik-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: authentik
+      POSTGRES_PASSWORD: ${AUTHENTIK_DB_PASSWORD:-change-me-authentik-db}
+      POSTGRES_DB: authentik
+    volumes:
+      - authentikdb:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U authentik"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    logging: *logging-default
+
+  authentik-redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - authentikredis:/data
+    logging: *logging-default
+
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=${PROM_RETENTION:-90d}
+    volumes:
+      - ./infra/monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./infra/monitoring/prometheus/rules.yml:/etc/prometheus/rules.yml:ro
+      - promdata:/prometheus
+    depends_on:
+      - api
+    logging: *logging-default
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-change-me}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_SERVER_ROOT_URL: https://monitoring.signara.innotel.us
+    volumes:
+      - ./infra/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafanadata:/var/lib/grafana
+    depends_on:
+      - prometheus
+      - loki
+    logging: *logging-default
+
+  loki:
+    image: grafana/loki:3.1.0
+    restart: unless-stopped
+    command: -config.file=/etc/loki/loki.yaml
+    volumes:
+      - ./infra/monitoring/loki/loki.yaml:/etc/loki/loki.yaml:ro
+      - lokidata:/loki
+    logging: *logging-default
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    volumes:
+      - ./infra/monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertdata:/alertmanager
+    logging: *logging-default
+
+  # --------------------------------------------------------------- backup ---
+  backup:
+    image: alpine:3.20
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "/backup/entrypoint.sh"]
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: ${POSTGRES_USER:-signara}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      POSTGRES_DB: ${POSTGRES_DB:-signara}
+      S3_ENDPOINT: ${BACKUP_S3_ENDPOINT:-}
+      S3_BUCKET: ${BACKUP_S3_BUCKET:-signara-backups}
+      S3_ACCESS_KEY: ${BACKUP_S3_ACCESS_KEY:-}
+      S3_SECRET_KEY: ${BACKUP_S3_SECRET_KEY:-}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-30}
+      BACKUP_CRON: ${BACKUP_CRON:-0 2 * * *}
+    volumes:
+      - ./infra/backup:/backup:ro
+      - backupcache:/backup-cache
+    depends_on:
+      postgres:
+        condition: service_healthy
+    logging: *logging-default
+
+volumes:
+  pgdata:
+  redisdata:
+  miniodata:
+  meilidata:
+  authentikdb:
+  authentikredis:
+  promdata:
+  grafanadata:
+  lokidata:
+  alertdata:
+  backupcache:
