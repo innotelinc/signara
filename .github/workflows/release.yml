@@ -1,0 +1,48 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Create GitHub Release with notes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate release notes
+        id: notes
+        uses: release-drafter/release-drafter@v6
+        with:
+          config-name: release-drafter.yml
+          publish: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Ensure SBOM artifacts exist
+        uses: anchore/sbom-action@v0.17.2
+        with:
+          path: .
+          format: spdx-json
+          artifact-name: signara-sbom.spdx.json
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
+          body: |
+            ## Signara ${{ github.ref_name }}
+
+            ${{ steps.notes.outputs.body }}
+
+            ### Artifacts
+            - Container images: `ghcr.io/<owner>/signara-api`, `ghcr.io/<owner>/signara-web` (tag `${{ github.ref_name }}`)
+            - SBOM: `signara-sbom.spdx.json`
+          files: signara-sbom.spdx.json

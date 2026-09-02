@@ -1,0 +1,64 @@
+# Authentik identity provider (server + worker). A production deployment also
+# needs its own PostgreSQL/Redis for Authentik — provision them similarly to
+# the Signara statefulsets (see docs/Deployment.md § Identity provider).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: authentik
+  namespace: signara
+  labels:
+    app.kubernetes.io/name: authentik
+    app.kubernetes.io/part-of: signara
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: authentik
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: authentik
+    spec:
+      securityContext:
+        runAsNonRoot: true
+      containers:
+        - name: authentik
+          image: ghcr.io/goauthentik/server:2024.8.1
+          args: ["server"]
+          ports:
+            - containerPort: 9000
+              name: http
+          env:
+            - name: AUTHENTIK_SECRET_KEY
+              valueFrom:
+                secretKeyRef: { name: signara-secrets, key: AUTHENTIK_SECRET_KEY }
+            - name: AUTHENTIK_ERROR_REPORTING__ENABLED
+              value: "false"
+            # Point these at your Authentik DB/Redis services
+            - name: AUTHENTIK_POSTGRESQL__HOST
+              value: "authentik-postgres"
+            - name: AUTHENTIK_POSTGRESQL__USER
+              value: "authentik"
+            - name: AUTHENTIK_POSTGRESQL__PASSWORD
+              valueFrom:
+                secretKeyRef: { name: signara-secrets, key: AUTHENTIK_DB_PASSWORD }
+            - name: AUTHENTIK_POSTGRESQL__NAME
+              value: "authentik"
+            - name: AUTHENTIK_REDIS__HOST
+              value: "authentik-redis"
+          resources:
+            requests: { cpu: 250m, memory: 512Mi }
+            limits: { cpu: "1", memory: 1Gi }
+          readinessProbe:
+            httpGet: { path: /health/live/, port: http }
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          livenessProbe:
+            httpGet: { path: /health/live/, port: http }
+            initialDelaySeconds: 60
+            periodSeconds: 30
