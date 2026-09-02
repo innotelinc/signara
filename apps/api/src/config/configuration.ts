@@ -1,0 +1,80 @@
+export default () => ({
+  env: process.env.NODE_ENV ?? 'development',
+  app: {
+    name: process.env.APP_NAME ?? 'Signara',
+    url: process.env.APP_URL ?? 'https://app.signara.innotel.us',
+    apiUrl: process.env.API_URL ?? 'https://api.signara.innotel.us',
+    webUrl: process.env.WEB_URL ?? 'https://app.signara.innotel.us',
+    authUrl: process.env.AUTH_URL ?? 'https://auth.signara.innotel.us',
+    port: Number(process.env.API_PORT ?? 8000),
+  },
+  database: {
+    url: process.env.DATABASE_URL ?? 'postgresql://signara:signara@localhost:5432/signara?schema=public',
+  },
+  redis: {
+    url: process.env.REDIS_URL ?? 'redis://localhost:6379',
+  },
+  s3: {
+    endpoint: process.env.S3_ENDPOINT ?? 'http://localhost:9000',
+    region: process.env.S3_REGION ?? 'us-east-1',
+    bucket: process.env.S3_BUCKET ?? 'signara-documents',
+    accessKey: process.env.S3_ACCESS_KEY ?? '',
+    secretKey: process.env.S3_SECRET_KEY ?? '',
+    forcePathStyle: process.env.S3_FORCE_PATH_STYLE !== 'false',
+  },
+  meilisearch: {
+    host: process.env.MEILISEARCH_HOST ?? 'http://localhost:7700',
+    apiKey: process.env.MEILISEARCH_API_KEY ?? '',
+  },
+  oidc: {
+    issuerUrl: process.env.OIDC_ISSUER_URL ?? '',
+    clientId: process.env.OIDC_CLIENT_ID ?? '',
+    clientSecret: process.env.OIDC_CLIENT_SECRET ?? '',
+    jwksUrl: process.env.OIDC_JWKS_URL ?? '',
+    redirectUri: process.env.OIDC_REDIRECT_URI ?? '',
+    authorizationUrl: process.env.OIDC_AUTHORIZATION_URL ?? '',
+    tokenUrl: process.env.OIDC_TOKEN_URL ?? '',
+    userinfoUrl: process.env.OIDC_USERINFO_URL ?? '',
+    scopes: (process.env.OIDC_SCOPES ?? 'openid profile email groups').split(' '),
+    idpAdminGroup: process.env.IDP_ADMIN_GROUP ?? 'signara-admins',
+  },
+  auth: {
+    jwtAccessSecret: process.env.JWT_ACCESS_SECRET ?? '',
+    jwtAccessTtl: process.env.JWT_ACCESS_TTL ?? '15m',
+    jwtRefreshSecret: process.env.JWT_REFRESH_SECRET ?? '',
+    jwtRefreshTtl: process.env.JWT_REFRESH_TTL ?? '30d',
+    cryptoMasterKey: process.env.CRYPTO_MASTER_KEY ?? '',
+    cookieSecure: process.env.SESSION_COOKIE_SECURE === 'true',
+  },
+  certificates: {
+    acmeDirectoryUrl: process.env.ACME_DIRECTORY_URL ?? '',
+    acmeContactEmail: process.env.ACME_CONTACT_EMAIL ?? '',
+    acmeDnsProvider: process.env.ACME_DNS_PROVIDER ?? '',
+    acmeHttpChallenge: process.env.ACME_HTTP_CHALLENGE === 'true',
+    ceruleanApiUrl: process.env.CERULEAN_API_URL ?? 'https://api.cerulean.com/v1',
+    ceruleanApiKey: process.env.CERULEAN_API_KEY ?? '',
+    internalPkiScript: process.env.INTERNAL_PKI_PROVISION_SCRIPT ?? '',
+    cloudflareApiToken: process.env.CF_API_TOKEN ?? '',
+  },
+  rateLimit: {
+    windowMs: Number(process.env.RATE_LIMIT_WINDOW_MS ?? 60_000),
+    max: Number(process.env.RATE_LIMIT_MAX ?? 100),
+  },
+  billing: {
+    enabled: process.env.BILLING_ENABLED === 'true',
+    stripeSecretKey: process.env.STRIPE_SECRET_KEY ?? '',
+    stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? '',
+  },
+  smtp: {
+    host: process.env.SMTP_HOST ?? '',
+    port: Number(process.env.SMTP_PORT ?? 587),
+    secure: process.env.SMTP_SECURE, // 'true' = implicit TLS (SMTPS); unset → port 465 implies TLS
+    user: process.env.SMTP_USER ?? '',
+    pass: process.env.SMTP_PASS ?? '',
+    from: process.env.SMTP_FROM ?? 'Signara <no-reply@signara.innotel.us>',
+  },
+  monitoring: {
+    otelEndpoint: process.env.OTEL_EXPORTER_OTLP_ENDPOINT ?? '',
+    sentryDsn: process.env.SENTRY_DSN ?? '',
+  },
+});

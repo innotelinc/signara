@@ -1,0 +1,47 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build output
+dist/
+build/
+.next/
+out/
+coverage/
+*.tsbuildinfo
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+!infra/kubernetes/base/*.example.yaml
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Prisma
+packages/database/prisma/*.db
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Test artifacts
+playwright-report/
+test-results/
+
+# Docker volumes (if mounted into the repo)
+.pgdata/
+.minio/
+.redis/
+# Python
+__pycache__/
+*.py[cod]

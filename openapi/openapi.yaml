@@ -1,0 +1,1978 @@
+openapi: 3.1.0
+info:
+  title: Signara API
+  version: 1.0.0
+  description: |
+    Secure Every Signature. — REST API for the Signara digital document signing and
+    agreement management platform.
+
+    - Base path: `/api/v1`
+    - Interactive docs (Swagger UI): `/api/v1/docs`
+    - Live YAML: `/api/v1/openapi.yaml`
+
+    ## Authentication
+    Two mechanisms are supported:
+
+    | Scheme | Where | Usage |
+    | --- | --- | --- |
+    | Bearer JWT (`access-token`) | `Authorization: Bearer <token>` | Interactive sessions issued by the OIDC flow |
+    | API key (`api-key`) | `X-API-Key: sgn_...` | Machine-to-machine clients |
+
+    ## Tenancy
+    Tenant-scoped endpoints require an active organization context. Endpoints decorated
+    with `x-tenant-required: true` return `403` when the caller has no membership.
+
+    ## Idempotency
+    Mutating endpoints accept `X-Idempotency-Key` — repeat requests with the same key
+    return the stored response instead of re-executing.
+  termsOfService: https://signara.innotel.us/terms
+  contact:
+    name: Signara
+    url: https://signara.innotel.us
+    email: support@signara.innotel.us
+  license:
+    name: AGPL-3.0-or-later
+    identifier: AGPL-3.0-or-later
+servers:
+  - url: https://api.signara.innotel.us/api/v1
+    description: Production
+  - url: http://localhost:8000/api/v1
+    description: Local development
+tags:
+  - name: auth
+    description: OIDC login, sessions, and the current user
+  - name: organizations
+    description: Tenant profile, workspaces, and teams
+  - name: users
+    description: User profiles and member management
+  - name: documents
+    description: Upload, storage, versions, download, and search
+  - name: templates
+    description: Reusable fields and variables
+  - name: signatures
+    description: Signing requests and public token-based signing
+  - name: audit
+    description: Audit log and evidence exports
+  - name: billing
+    description: Plans, subscriptions, invoices, coupons, usage
+  - name: notifications
+    description: In-app notifications
+  - name: api-keys
+    description: Programmatic access management
+  - name: admin
+    description: Platform administration (PLATFORM_ADMIN only)
+  - name: certificates
+    description: Certificate-backed signatures (ACME, Cerulean, enterprise PKI)
+security:
+  - access-token: []
+paths:
+  # ---------------------------------------------------------------- auth ---
+  /auth/login:
+    get:
+      tags: [auth]
+      summary: Redirect to the identity provider (Authentik)
+      parameters:
+        - name: next
+          in: query
+          schema: { type: string }
+          description: Post-login path on the web app
+      responses:
+        '302': { description: Redirect to Authentik authorize endpoint }
+  /auth/callback:
+    get:
+      tags: [auth]
+      summary: OIDC authorization-code callback
+      description: Establishes access/refresh cookies and redirects to the app.
+      parameters:
+        - { name: code, in: query, required: true, schema: { type: string } }
+        - { name: state, in: query, required: true, schema: { type: string } }
+        - { name: error, in: query, required: false, schema: { type: string } }
+      responses:
+        '302': { description: Redirect to the web app with session cookies }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /auth/refresh:
+    post:
+      tags: [auth]
+      summary: Rotate the session and issue a fresh access token
+      responses:
+        '200':
+          description: New access token
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accessToken: { type: string, description: Short-lived JWT (15 min) }
+                  expiresIn: { type: integer, example: 900 }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /auth/logout:
+    post:
+      tags: [auth]
+      summary: Revoke the current session and clear cookies
+      responses:
+        '200':
+          description: Session revoked
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Success' }
+  /auth/me:
+    get:
+      tags: [auth]
+      summary: Get the current user and active tenant
+      responses:
+        '200':
+          description: Current principal
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Principal' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  # -------------------------------------------------------- organizations ---
+  /organizations/current:
+    get:
+      tags: [organizations]
+      x-tenant-required: true
+      security:
+        - access-token: []
+        - api-key: []
+      summary: Get the active organization profile
+      responses:
+        '200':
+          description: Organization with plan and counts
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OrganizationDetail' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    patch:
+      tags: [organizations]
+      x-tenant-required: true
+      summary: Update organization profile and branding
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OrganizationUpdate' }
+      responses:
+        '200':
+          description: Updated organization
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Organization' }
+  /organizations/current/workspaces:
+    get:
+      tags: [organizations]
+      x-tenant-required: true
+      summary: List workspaces
+      responses:
+        '200':
+          description: Workspaces
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Workspace' }
+    post:
+      tags: [organizations]
+      x-tenant-required: true
+      summary: Create a workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/WorkspaceCreate' }
+      responses:
+        '201':
+          description: Created workspace
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Workspace' }
+  /organizations/current/teams:
+    get:
+      tags: [organizations]
+      x-tenant-required: true
+      summary: List teams
+      parameters:
+        - { name: workspaceId, in: query, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Teams
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Team' }
+    post:
+      tags: [organizations]
+      x-tenant-required: true
+      summary: Create a team
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TeamCreate' }
+      responses:
+        '201':
+          description: Created team
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Team' }
+
+  # --------------------------------------------------------------- users ---
+  /users/me:
+    get:
+      tags: [users]
+      summary: Get the current user profile
+      responses:
+        '200':
+          description: Profile
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserProfile' }
+    patch:
+      tags: [users]
+      summary: Update the current user profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                displayName: { type: string }
+                timezone: { type: string, example: UTC }
+                locale: { type: string, example: en }
+      responses:
+        '200':
+          description: Updated profile
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserProfile' }
+  /users:
+    get:
+      tags: [users]
+      x-tenant-required: true
+      summary: List organization members
+      parameters:
+        - { name: search, in: query, schema: { type: string } }
+        - { name: role, in: query, schema: { $ref: '#/components/schemas/MembershipRole' } }
+        - { name: limit, in: query, schema: { type: integer, default: 50, maximum: 200 } }
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+      responses:
+        '200':
+          description: Paginated members
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: { type: integer }
+                  limit: { type: integer }
+                  offset: { type: integer }
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Membership' }
+  /users/invite:
+    post:
+      tags: [users]
+      x-tenant-required: true
+      summary: Invite a member to the organization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, role]
+              properties:
+                email: { type: string, format: email }
+                role: { $ref: '#/components/schemas/MembershipRole' }
+                workspaceIds:
+                  type: array
+                  items: { type: string, format: uuid }
+      responses:
+        '201':
+          description: Invitation created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string, format: uuid }
+                  email: { type: string, format: email }
+                  role: { $ref: '#/components/schemas/MembershipRole' }
+                  status: { type: string, example: INVITED }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /users/{id}/role:
+    patch:
+      tags: [users]
+      x-tenant-required: true
+      summary: Update a member's role
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                role: { $ref: '#/components/schemas/MembershipRole' }
+      responses:
+        '200':
+          description: Updated membership
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Membership' }
+  /users/{id}:
+    delete:
+      tags: [users]
+      x-tenant-required: true
+      summary: Remove a member from the organization
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Member removed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Success' }
+
+  # ------------------------------------------------------------ documents ---
+  /documents:
+    get:
+      tags: [documents]
+      x-tenant-required: true
+      summary: List documents (searches via Meilisearch when `search` is set)
+      parameters:
+        - { name: search, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/DocumentStatus' } }
+        - { name: workspaceId, in: query, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, default: 25, maximum: 100 } }
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+      responses:
+        '200':
+          description: Paginated documents
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DocumentList' }
+  /documents/upload:
+    post:
+      tags: [documents]
+      x-tenant-required: true
+      summary: Upload a document (PDF, DOCX, PNG, JPEG, WebP; max 50 MB)
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+                title: { type: string }
+                description: { type: string }
+                workspaceId: { type: string, format: uuid }
+                tags:
+                  type: array
+                  items: { type: string }
+      responses:
+        '201':
+          description: Document created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Document' }
+        '400':
+          description: Unsupported type or payload too large
+          $ref: '#/components/responses/BadRequest'
+  /documents/{id}:
+    get:
+      tags: [documents]
+      x-tenant-required: true
+      summary: Get a document with version history
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Document detail
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DocumentDetail' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [documents]
+      x-tenant-required: true
+      summary: Update document metadata
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: { type: string }
+                description: { type: string }
+                tags:
+                  type: array
+                  items: { type: string }
+                workspaceId: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Updated document
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Document' }
+    delete:
+      tags: [documents]
+      x-tenant-required: true
+      summary: Soft-delete a document
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Document deleted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Success' }
+  /documents/{id}/download:
+    get:
+      tags: [documents]
+      x-tenant-required: true
+      summary: Get a time-limited presigned download URL
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: version, in: query, schema: { type: integer, minimum: 1 }, description: Optional version number }
+      responses:
+        '200':
+          description: Presigned URL (valid 15 min)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  url: { type: string, format: uri }
+                  fileName: { type: string }
+                  contentType: { type: string }
+  /documents/{id}/versions:
+    post:
+      tags: [documents]
+      x-tenant-required: true
+      summary: Upload a new immutable version of a document
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+                changeNote: { type: string }
+      responses:
+        '201':
+          description: New version recorded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version: { $ref: '#/components/schemas/DocumentVersion' }
+                  document: { $ref: '#/components/schemas/Document' }
+
+  # ------------------------------------------------------------ templates ---
+  /templates:
+    get:
+      tags: [templates]
+      x-tenant-required: true
+      summary: List templates
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [DRAFT, ACTIVE, ARCHIVED] } }
+        - { name: workspaceId, in: query, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, default: 25, maximum: 100 } }
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+      responses:
+        '200':
+          description: Paginated templates
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: { type: integer }
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Template' }
+    post:
+      tags: [templates]
+      x-tenant-required: true
+      summary: Create a template with reusable fields
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TemplateCreate' }
+      responses:
+        '201':
+          description: Template created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TemplateDetail' }
+  /templates/{id}:
+    get:
+      tags: [templates]
+      x-tenant-required: true
+      summary: Get a template with its fields
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Template detail
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TemplateDetail' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [templates]
+      x-tenant-required: true
+      summary: Update a template (replaces fields and variables)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                description: { type: string }
+                status: { type: string, enum: [DRAFT, ACTIVE, ARCHIVED] }
+                variables: { type: object, additionalProperties: { type: string } }
+                fields:
+                  type: array
+                  items: { $ref: '#/components/schemas/TemplateField' }
+      responses:
+        '200':
+          description: Updated template
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TemplateDetail' }
+    delete:
+      tags: [templates]
+      x-tenant-required: true
+      summary: Delete a template
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Template deleted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Success' }
+
+  # ----------------------------------------------------------- signatures ---
+  /signatures/requests:
+    get:
+      tags: [signatures]
+      x-tenant-required: true
+      summary: List signing requests
+      parameters:
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/DocumentStatus' } }
+        - { name: limit, in: query, schema: { type: integer, default: 25, maximum: 100 } }
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+      responses:
+        '200':
+          description: Paginated requests
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: { type: integer }
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/SigningRequestSummary' }
+    post:
+      tags: [signatures]
+      x-tenant-required: true
+      summary: Create a signing request (sequential or parallel)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SigningRequestCreate' }
+      responses:
+        '201':
+          description: Request created with signer sessions
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SigningRequestDetail' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /signatures/requests/{id}:
+    get:
+      tags: [signatures]
+      x-tenant-required: true
+      summary: Get a signing request with events and signatures
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Request detail
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SigningRequestDetail' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /signatures/requests/{id}/cancel:
+    post:
+      tags: [signatures]
+      x-tenant-required: true
+      summary: Cancel a signing request
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string }
+      responses:
+        '200':
+          description: Request cancelled
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Success' }
+  /signatures/requests/{id}/remind:
+    post:
+      tags: [signatures]
+      x-tenant-required: true
+      summary: Send reminders to pending signers (max once per 24h per signer)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                signerId: { type: string, format: uuid, nullable: true }
+      responses:
+        '200':
+          description: Reminders enqueued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  enqueued: { type: integer }
+  /signatures/requests/{id}/evidence:
+    get:
+      tags: [signatures]
+      x-tenant-required: true
+      summary: Generate the signature evidence report
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Evidence report
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EvidenceReport' }
+  /signatures/public/{token}:
+    get:
+      tags: [signatures]
+      security: []
+      summary: Public signing session (unguessable per-signer token)
+      description: No authentication — the token is the credential.
+      parameters:
+        - { name: token, in: path, required: true, schema: { type: string, example: sgn_xxxx } }
+      responses:
+        '200':
+          description: Signing session
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SigningSession' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /signatures/public/{token}/sign:
+    post:
+      tags: [signatures]
+      security: []
+      summary: Record a signature from the public session
+      parameters:
+        - { name: token, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SignInput' }
+      responses:
+        '200':
+          description: Signature recorded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  signatureId: { type: string, format: uuid }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /signatures/public/{token}/decline:
+    post:
+      tags: [signatures]
+      security: []
+      summary: Decline to sign
+      parameters:
+        - { name: token, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string }
+      responses:
+        '200':
+          description: Decline recorded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Success' }
+  /signatures/public/{token}/events:
+    get:
+      tags: [signatures]
+      security: []
+      summary: Event history visible to the signer
+      parameters:
+        - { name: token, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Signer-visible events
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  requestId: { type: string, format: uuid }
+                  signerId: { type: string, format: uuid }
+                  events:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string, format: uuid }
+                        type: { $ref: '#/components/schemas/SignatureEventType' }
+                        createdAt: { type: string, format: date-time }
+                        metadata: { type: object }
+
+  # --------------------------------------------------------------- audit ---
+  /audit:
+    get:
+      tags: [audit]
+      x-tenant-required: true
+      summary: Query the organization audit log
+      parameters:
+        - { name: action, in: query, schema: { type: string } }
+        - { name: resourceType, in: query, schema: { type: string } }
+        - { name: resourceId, in: query, schema: { type: string } }
+        - { name: outcome, in: query, schema: { $ref: '#/components/schemas/AuditOutcome' } }
+        - { name: actorEmail, in: query, schema: { type: string, format: email } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+        - { name: limit, in: query, schema: { type: integer, default: 100, maximum: 500 } }
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+      responses:
+        '200':
+          description: Paginated audit rows
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: { type: integer }
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/AuditLog' }
+  /audit/export:
+    get:
+      tags: [audit]
+      x-tenant-required: true
+      summary: Export the audit log as CSV (max 50,000 rows)
+      parameters:
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+        - { name: action, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: CSV attachment
+          content:
+            text/csv:
+              schema: { type: string }
+  /audit/csp-report:
+    post:
+      tags: [audit]
+      security: []
+      summary: Ingest Content-Security-Policy violation reports
+      description: Called by browsers; body is sanitized and stored as an audit row.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        '200':
+          description: Report received
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Success' }
+
+  # -------------------------------------------------------------- billing ---
+  /billing:
+    get:
+      tags: [billing]
+      x-tenant-required: true
+      summary: Get the billing account with subscriptions
+      responses:
+        '200':
+          description: Billing account
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BillingAccount' }
+  /billing/plans:
+    get:
+      tags: [billing]
+      x-tenant-required: true
+      summary: List the plan catalog
+      responses:
+        '200':
+          description: Active plans
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Plan' }
+  /billing/subscriptions:
+    post:
+      tags: [billing]
+      x-tenant-required: true
+      summary: Create a subscription for the organization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [plan]
+              properties:
+                plan: { $ref: '#/components/schemas/PlanCode' }
+                seats: { type: integer, minimum: 1, default: 1 }
+                couponCode: { type: string }
+                period: { type: string, enum: [monthly, yearly], default: monthly }
+      responses:
+        '201':
+          description: Billing account updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BillingAccount' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+  /billing/invoices:
+    get:
+      tags: [billing]
+      x-tenant-required: true
+      summary: List invoices
+      responses:
+        '200':
+          description: Invoices
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: { type: integer }
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Invoice' }
+  /billing/usage:
+    get:
+      tags: [billing]
+      x-tenant-required: true
+      summary: Current billing-period usage and limits
+      responses:
+        '200':
+          description: Usage counters
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  periodStart: { type: string, format: date-time }
+                  plan: { $ref: '#/components/schemas/PlanCode' }
+                  usage:
+                    type: object
+                    properties:
+                      documents: { type: integer }
+                      completedRequests: { type: integer }
+                      members: { type: integer }
+                  limits:
+                    type: object
+                    properties:
+                      documents: { type: integer, nullable: true }
+                      seats: { type: integer }
+                      storageBytes: { type: integer, nullable: true }
+
+  # -------------------------------------------------------- notifications ---
+  /notifications:
+    get:
+      tags: [notifications]
+      x-tenant-required: true
+      summary: List notifications for the current user
+      parameters:
+        - { name: unreadOnly, in: query, schema: { type: boolean } }
+        - { name: limit, in: query, schema: { type: integer, default: 25, maximum: 100 } }
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+      responses:
+        '200':
+          description: Paginated notifications
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: { type: integer }
+                  unread: { type: integer }
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Notification' }
+  /notifications/{id}/read:
+    patch:
+      tags: [notifications]
+      x-tenant-required: true
+      summary: Mark a notification as read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Notification updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Notification' }
+  /notifications/read-all:
+    post:
+      tags: [notifications]
+      x-tenant-required: true
+      summary: Mark all notifications as read
+      responses:
+        '200':
+          description: All marked read
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Success' }
+
+  # ------------------------------------------------------------- api-keys ---
+  /api-keys:
+    get:
+      tags: [api-keys]
+      x-tenant-required: true
+      summary: List active API keys
+      responses:
+        '200':
+          description: API keys
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ApiKey' }
+    post:
+      tags: [api-keys]
+      x-tenant-required: true
+      summary: Create an API key (plaintext returned once)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+                scopes:
+                  type: array
+                  items: { type: string }
+                  description: Permission codes granted to the key
+                expiresInDays: { type: integer, minimum: 1, maximum: 365 }
+      responses:
+        '201':
+          description: Key created — `key` shown exactly once
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiKey'
+                  - type: object
+                    properties:
+                      key: { type: string, example: sgn_abcd..., description: Store safely — shown once }
+  /api-keys/{id}:
+    delete:
+      tags: [api-keys]
+      x-tenant-required: true
+      summary: Revoke an API key
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Key revoked
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Success' }
+
+  # ---------------------------------------------------------- certificates --
+  /certificates:
+    get:
+      tags: [certificates]
+      x-tenant-required: true
+      summary: List certificates for the organization
+      parameters:
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/CertificateStatus' } }
+        - { name: limit, in: query, schema: { type: integer, default: 25, maximum: 100 } }
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+      responses:
+        '200':
+          description: Paginated certificates
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: { type: integer }
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/SigningCertificate' }
+  /certificates/providers:
+    get:
+      tags: [certificates]
+      x-tenant-required: true
+      summary: Provider configuration status (ACME, Cerulean, Internal PKI)
+      responses:
+        '200':
+          description: Provider availability
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    kind: { $ref: '#/components/schemas/CertificateProvider' }
+                    configured: { type: boolean }
+  /certificates/import:
+    post:
+      tags: [certificates]
+      x-tenant-required: true
+      summary: Import an existing certificate (enterprise PKI / internal CA)
+      description: Optional private key is verified against the certificate and encrypted at rest with CRYPTO_MASTER_KEY. Re-importing a serial reactivates the row.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [certificatePem]
+              properties:
+                certificatePem: { type: string, description: End-entity certificate in PEM }
+                chainPem: { type: string, description: Intermediates + root (PEM), optional }
+                privateKeyPem: { type: string, description: Signing private key (PEM), optional — encrypted at rest }
+                provider: { $ref: '#/components/schemas/CertificateProvider' }
+                validationLevel: { type: string, enum: [DV, OV, EV] }
+                commonName: { type: string }
+      responses:
+        '201':
+          description: Imported certificate (private key never returned)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SigningCertificate' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+  /certificates/provision:
+    post:
+      tags: [certificates]
+      x-tenant-required: true
+      summary: Provision a certificate via ACME, Cerulean, or an internal PKI script
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [provider, commonName]
+              properties:
+                provider: { $ref: '#/components/schemas/CertificateProvider' }
+                commonName: { type: string, description: Subject CN — signer email for person certificates }
+                email: { type: string, format: email }
+                options: { type: object, description: Provider-specific (ACME dns handler, Cerulean template, ...) }
+      responses:
+        '201':
+          description: Provisioned and stored certificate
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SigningCertificate' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+  /certificates/verify:
+    post:
+      tags: [certificates]
+      x-tenant-required: true
+      summary: Verify a certificate and (optionally) a cryptographic signature
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                certificatePem: { type: string }
+                certificateId: { type: string, format: uuid }
+                signatureValue: { type: string, description: Base64 signature over the digest }
+                signedHash: { type: string, description: SHA-256 hex of the signed content }
+      responses:
+        '200':
+          description: Verification report with identity assurance
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CertificateVerificationResult' }
+  /certificates/{id}:
+    get:
+      tags: [certificates]
+      x-tenant-required: true
+      summary: Get a certificate
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Certificate detail
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SigningCertificate' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /certificates/{id}/revoke:
+    patch:
+      tags: [certificates]
+      x-tenant-required: true
+      summary: Revoke a certificate (immediately blocks certificate-backed signing)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string }
+      responses:
+        '200':
+          description: Certificate revoked
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SigningCertificate' }
+
+  # ---------------------------------------------------------------- admin ---
+  /admin/organizations:
+    get:
+      tags: [admin]
+      x-tenant-required: true
+      summary: List all organizations across tenants
+      parameters:
+        - { name: search, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, default: 25, maximum: 200 } }
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+      responses:
+        '200':
+          description: Paginated organizations
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: { type: integer }
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/OrganizationDetail' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /admin/users:
+    get:
+      tags: [admin]
+      x-tenant-required: true
+      summary: List all users across tenants
+      parameters:
+        - { name: search, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, default: 25, maximum: 200 } }
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+      responses:
+        '200':
+          description: Paginated users
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: { type: integer }
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/UserProfile' }
+  /admin/organizations/{id}/status:
+    patch:
+      tags: [admin]
+      x-tenant-required: true
+      summary: Suspend or activate a tenant organization
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { type: string, enum: [ACTIVE, SUSPENDED, CANCELED] }
+      responses:
+        '200':
+          description: Organization status updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string, format: uuid }
+                  status: { type: string }
+  /admin/users/{id}/status:
+    patch:
+      tags: [admin]
+      x-tenant-required: true
+      summary: Suspend or activate a user account
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { type: string, enum: [ACTIVE, SUSPENDED, DEACTIVATED] }
+      responses:
+        '200':
+          description: User status updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string, format: uuid }
+                  status: { type: string }
+  /admin/metrics:
+    get:
+      tags: [admin]
+      x-tenant-required: true
+      summary: Platform-wide counts
+      responses:
+        '200':
+          description: Platform metrics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  generatedAt: { type: string, format: date-time }
+                  counts:
+                    type: object
+                    properties:
+                      organizations: { type: integer }
+                      users: { type: integer }
+                      documents: { type: integer }
+                      completedRequests: { type: integer }
+                      activeSigningRequests: { type: integer }
+                  auditEvents24h: { type: integer }
+
+components:
+  securitySchemes:
+    access-token:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT issued by the Signara API after the Authentik OIDC flow, or the raw Authentik access token.
+    api-key:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: "API key created via POST /api-keys, e.g. `X-API-Key: sgn_...`"
+  responses:
+    BadRequest:
+      description: Validation or business rule violation
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    Unauthorized:
+      description: Missing, invalid, or expired credentials
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    Forbidden:
+      description: Authenticated but not allowed (missing permission/tenant)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    NotFound:
+      description: Resource does not exist or is outside the tenant
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    Conflict:
+      description: State conflict (e.g. duplicate email, already signed)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    TooManyRequests:
+      description: Rate limit exceeded
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  schemas:
+    Success:
+      type: object
+      properties:
+        success: { type: boolean, example: true }
+
+    ErrorEnvelope:
+      type: object
+      properties:
+        statusCode: { type: integer }
+        error: { type: string }
+        message:
+          type: array
+          items: { type: string }
+        path: { type: string }
+        timestamp: { type: string, format: date-time }
+        requestId: { type: string }
+
+    # ------------------------------------------------------------- auth ---
+    Principal:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        displayName: { type: string, nullable: true }
+        platformRole: { type: string, enum: [USER, PLATFORM_ADMIN] }
+        sub: { type: string }
+        groups:
+          type: array
+          items: { type: string }
+        org:
+          type: object
+          nullable: true
+          properties:
+            id: { type: string, format: uuid }
+            slug: { type: string }
+            role: { $ref: '#/components/schemas/MembershipRole' }
+            permissions:
+              type: array
+              items: { type: string }
+
+    # -------------------------------------------------------- organizations -
+    Organization:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        slug: { type: string }
+        legalName: { type: string, nullable: true }
+        taxId: { type: string, nullable: true }
+        logoUrl: { type: string, nullable: true }
+        status: { type: string, enum: [ACTIVE, TRIAL, SUSPENDED, CANCELED] }
+        branding: { type: object, nullable: true }
+        trialEndsAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    OrganizationUpdate:
+      type: object
+      properties:
+        name: { type: string }
+        legalName: { type: string }
+        taxId: { type: string }
+        branding:
+          type: object
+          description: "colors/logo overrides, e.g. { \"primaryColor\": \"#0F62FE\" }"
+    OrganizationDetail:
+      allOf:
+        - $ref: '#/components/schemas/Organization'
+        - type: object
+          properties:
+            billingAccount:
+              type: object
+              nullable: true
+              properties:
+                plan: { $ref: '#/components/schemas/PlanCode' }
+                status: { $ref: '#/components/schemas/SubscriptionStatus' }
+                seatsLimit: { type: integer }
+                currentPeriodEnd: { type: string, format: date-time, nullable: true }
+            _count:
+              type: object
+              properties:
+                memberships: { type: integer }
+                documents: { type: integer }
+                workspaces: { type: integer }
+    Workspace:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        organizationId: { type: string, format: uuid }
+        name: { type: string }
+        slug: { type: string }
+        description: { type: string, nullable: true }
+        visibility: { type: string, enum: [PRIVATE, TEAM, ORGANIZATION] }
+        isDefault: { type: boolean }
+        createdAt: { type: string, format: date-time }
+    WorkspaceCreate:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        slug: { type: string }
+        description: { type: string }
+        visibility: { type: string, enum: [PRIVATE, TEAM, ORGANIZATION], default: ORGANIZATION }
+    Team:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        organizationId: { type: string, format: uuid }
+        workspaceId: { type: string, format: uuid, nullable: true }
+        name: { type: string }
+        description: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+        _count:
+          type: object
+          properties:
+            members: { type: integer }
+    TeamCreate:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        workspaceId: { type: string, format: uuid }
+        memberIds:
+          type: array
+          items: { type: string, format: uuid }
+
+    # --------------------------------------------------------------- users -
+    UserProfile:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        displayName: { type: string, nullable: true }
+        firstName: { type: string, nullable: true }
+        lastName: { type: string, nullable: true }
+        avatarUrl: { type: string, nullable: true }
+        timezone: { type: string }
+        locale: { type: string }
+        platformRole: { type: string, enum: [USER, PLATFORM_ADMIN] }
+        status: { type: string, enum: [ACTIVE, INVITED, SUSPENDED, DEACTIVATED] }
+        lastLoginAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+    Membership:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        organizationId: { type: string, format: uuid }
+        role: { $ref: '#/components/schemas/MembershipRole' }
+        roleId: { type: string, format: uuid, nullable: true }
+        createdAt: { type: string, format: date-time }
+        user:
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            email: { type: string, format: email }
+            displayName: { type: string, nullable: true }
+            avatarUrl: { type: string, nullable: true }
+            lastLoginAt: { type: string, format: date-time, nullable: true }
+    MembershipRole:
+      type: string
+      enum: [OWNER, ADMIN, MANAGER, AUDITOR, MEMBER]
+
+    # ------------------------------------------------------------ documents -
+    DocumentStatus:
+      type: string
+      enum: [DRAFT, AWAITING_SIGNATURE, IN_PROGRESS, COMPLETED, VOIDED, CANCELLED, EXPIRED]
+    Document:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        organizationId: { type: string, format: uuid }
+        workspaceId: { type: string, format: uuid, nullable: true }
+        templateId: { type: string, format: uuid, nullable: true }
+        title: { type: string }
+        description: { type: string, nullable: true }
+        status: { $ref: '#/components/schemas/DocumentStatus' }
+        fileName: { type: string }
+        contentHostType: { type: string, nullable: true }
+        sizeBytes: { type: integer, nullable: true }
+        checksumSha256: { type: string, nullable: true }
+        version: { type: integer, default: 1 }
+        tags:
+          type: array
+          items: { type: string }
+        metadata: { type: object, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    DocumentList:
+      type: object
+      properties:
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Document' }
+    DocumentVersion:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        documentId: { type: string, format: uuid }
+        version: { type: integer }
+        sizeBytes: { type: integer, nullable: true }
+        checksumSha256: { type: string, nullable: true }
+        changeNote: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+    DocumentDetail:
+      allOf:
+        - $ref: '#/components/schemas/Document'
+        - type: object
+          properties:
+            versions:
+              type: array
+              items: { $ref: '#/components/schemas/DocumentVersion' }
+
+    # ------------------------------------------------------------ templates -
+    Template:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        organizationId: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: string, nullable: true }
+        status: { type: string, enum: [DRAFT, ACTIVE, ARCHIVED] }
+        variables: { type: object, nullable: true }
+        updatedAt: { type: string, format: date-time }
+    TemplateField:
+      type: object
+      required: [type]
+      properties:
+        id: { type: string, format: uuid }
+        type:
+          type: string
+          enum: [SIGNATURE, INITIAL, DATE, TEXT, CHECKBOX, DROPDOWN, ATTACHMENT, NAME, EMAIL, COMPANY, JOB_TITLE, PHONE, ADDRESS, CUSTOM]
+        name: { type: string, nullable: true }
+        key: { type: string, nullable: true }
+        isRequired: { type: boolean, default: true }
+        pageNumber: { type: integer, minimum: 1, default: 1 }
+        x: { type: integer, nullable: true }
+        y: { type: integer, nullable: true }
+        width: { type: integer, nullable: true }
+        height: { type: integer, nullable: true }
+        options: { type: object, nullable: true }
+    TemplateCreate:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        workspaceId: { type: string, format: uuid }
+        variables: { type: object, additionalProperties: { type: string } }
+        fields:
+          type: array
+          items: { $ref: '#/components/schemas/TemplateField' }
+    TemplateDetail:
+      allOf:
+        - $ref: '#/components/schemas/Template'
+        - type: object
+          properties:
+            fields:
+              type: array
+              items: { $ref: '#/components/schemas/TemplateField' }
+
+    # ----------------------------------------------------------- signatures -
+    SigningMode:
+      type: string
+      enum: [SEQUENTIAL, PARALLEL]
+    SignerRole:
+      type: string
+      enum: [SIGNER, APPROVER, CC]
+    SignerStatus:
+      type: string
+      enum: [PENDING, INVITED, VIEWED, SIGNED, DECLINED, RESCINDED, EXPIRED]
+    SignatureType:
+      type: string
+      enum: [TYPED, DRAWN, UPLOADED, CERTIFICATE]
+    SignatureEventType:
+      type: string
+      enum: [CREATED, INVITED, VIEWED, SIGNED, DECLINED, REMINDED, EXPIRED, CANCELLED, VOIDED, APPROVED, REJECTED, DOWNLOADED, EMAIL_FAILED]
+    SigningRequestCreate:
+      type: object
+      required: [documentId, signers]
+      properties:
+        documentId: { type: string, format: uuid }
+        title: { type: string }
+        message: { type: string }
+        deadline: { type: string, format: date-time }
+        mode: { $ref: '#/components/schemas/SigningMode' }
+        sendInvites: { type: boolean, default: true }
+        signers:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items:
+            type: object
+            required: [email]
+            properties:
+              email: { type: string, format: email }
+              name: { type: string }
+              role: { $ref: '#/components/schemas/SignerRole' }
+              orderIndex: { type: integer, minimum: 0 }
+        workflowRules:
+          type: array
+          items:
+            type: object
+            properties:
+              orderIndex: { type: integer, minimum: 0 }
+              condition: { type: object }
+              action: { type: string, enum: [APPROVE, ROUTE, REQUIRE, NOTIFY] }
+              targetSignerId: { type: string, format: uuid }
+    SigningRequestSummary:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        organizationId: { type: string, format: uuid }
+        documentId: { type: string, format: uuid }
+        title: { type: string, nullable: true }
+        status: { $ref: '#/components/schemas/DocumentStatus' }
+        mode: { $ref: '#/components/schemas/SigningMode' }
+        deadline: { type: string, format: date-time, nullable: true }
+        completedAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        document:
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            title: { type: string }
+            fileName: { type: string }
+    SigningRequestDetail:
+      allOf:
+        - $ref: '#/components/schemas/SigningRequestSummary'
+        - type: object
+          properties:
+            message: { type: string, nullable: true }
+            signers:
+              type: array
+              items:
+                type: object
+                properties:
+                  id: { type: string, format: uuid }
+                  email: { type: string, format: email }
+                  name: { type: string, nullable: true }
+                  role: { $ref: '#/components/schemas/SignerRole' }
+                  orderIndex: { type: integer }
+                  status: { $ref: '#/components/schemas/SignerStatus' }
+                  viewedAt: { type: string, format: date-time, nullable: true }
+                  signedAt: { type: string, format: date-time, nullable: true }
+            signatures:
+              type: array
+              items: { $ref: '#/components/schemas/Signature' }
+            events:
+              type: array
+              items:
+                type: object
+                properties:
+                  id: { type: string, format: uuid }
+                  type: { $ref: '#/components/schemas/SignatureEventType' }
+                  signerId: { type: string, format: uuid, nullable: true }
+                  metadata: { type: object, nullable: true }
+                  ipAddress: { type: string, nullable: true }
+                  createdAt: { type: string, format: date-time }
+    Signature:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        requestId: { type: string, format: uuid }
+        documentId: { type: string, format: uuid }
+        signerId: { type: string, format: uuid }
+        type: { $ref: '#/components/schemas/SignatureType' }
+        certificateId: { type: string, format: uuid, nullable: true }
+        certificateSerial: { type: string, nullable: true }
+        signedHash: { type: string, nullable: true }
+        signatureValue: { type: string, nullable: true, description: Detached cryptographic signature (base64) }
+        signatureFormat: { type: string, nullable: true, example: RSA-SHA256 }
+        cryptoAlgorithm: { type: string, nullable: true }
+        identityAssurance: { $ref: '#/components/schemas/IdentityAssurance' }
+        ipAddress: { type: string, nullable: true }
+        signedAt: { type: string, format: date-time }
+        status: { type: string, enum: [VALID, INVALID, REVOKED] }
+    IdentityAssurance:
+      type: object
+      properties:
+        score:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Transparent factor-weighted score (see docs/Security.md)
+        level:
+          type: string
+          enum: [NONE, BASIC, ADVANCED, HIGH]
+        factors:
+          type: object
+          properties:
+            certificateValid: { type: boolean }
+            certIdentityMatch: { type: boolean }
+            accountVerified: { type: boolean }
+            mfaEnabled: { type: boolean }
+            revocationChecked: { type: boolean }
+            providerValidation: { type: string, nullable: true, enum: [DV, OV, EV] }
+    SigningCertificate:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        organizationId: { type: string, format: uuid }
+        userId: { type: string, format: uuid, nullable: true }
+        provider: { $ref: '#/components/schemas/CertificateProvider' }
+        status: { $ref: '#/components/schemas/CertificateStatus' }
+        commonName: { type: string }
+        email: { type: string, format: email, nullable: true }
+        serialNumber: { type: string }
+        subjectDN: { type: string }
+        issuerDN: { type: string, nullable: true }
+        notBefore: { type: string, format: date-time }
+        notAfter: { type: string, format: date-time }
+        certificatePem: { type: string, description: Public certificate — safe to display }
+        keyAlgorithm: { type: string, nullable: true }
+        validationLevel: { type: string, nullable: true, enum: [DV, OV, EV] }
+        sourceRef: { type: string, nullable: true }
+        revokedAt: { type: string, format: date-time, nullable: true }
+        revokedReason: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+      description: Private keys are never returned; they are encrypted at rest (AES-256-GCM under CRYPTO_MASTER_KEY) or held by the provider.
+    CertificateProvider:
+      type: string
+      enum: [CERULEAN, ACME, INTERNAL_PKI, WEB]
+    CertificateStatus:
+      type: string
+      enum: [ACTIVE, REVOKED, EXPIRED]
+    CertificateVerificationResult:
+      type: object
+      properties:
+        valid: { type: boolean }
+        serialNumber: { type: string }
+        subjectDN: { type: string }
+        issuerDN: { type: string, nullable: true }
+        notBefore: { type: string, format: date-time }
+        notAfter: { type: string, format: date-time }
+        email: { type: string, nullable: true }
+        signatureVerified: { type: boolean, nullable: true }
+        identityAssurance: { $ref: '#/components/schemas/IdentityAssurance' }
+        reasons:
+          type: array
+          items: { type: string }
+    SignInput:
+      type: object
+      properties:
+        type: { $ref: '#/components/schemas/SignatureType' }
+        certificateSerial: { type: string }
+        signedHash: { type: string, description: SHA-256 hex binding document + signer + request }
+        cryptoAlgorithm: { type: string, default: SHA-256 }
+        signatureData: { type: string }
+        certificateId: { type: string, format: uuid, description: Certificate to bind (required for CERTIFICATE signatures) }
+        signatureValue: { type: string, description: Base64 cryptographic signature produced by the key holder }
+        signatureFormat: { type: string, example: RSA-SHA256 }
+    SigningSession:
+      type: object
+      properties:
+        requestId: { type: string, format: uuid }
+        title: { type: string }
+        document:
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            fileName: { type: string }
+            downloadUrl: { type: string, format: uri }
+        signer:
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            email: { type: string, format: email }
+            name: { type: string, nullable: true }
+            role: { $ref: '#/components/schemas/SignerRole' }
+            status: { $ref: '#/components/schemas/SignerStatus' }
+            orderIndex: { type: integer }
+        message: { type: string, nullable: true }
+        deadline: { type: string, format: date-time, nullable: true }
+        mode: { $ref: '#/components/schemas/SigningMode' }
+        allowsSigning: { type: boolean }
+        authMethod: { type: string, enum: [email, oidc, certificate] }
+        requestedFields:
+          type: array
+          description: Field definitions when signing from a template
+    EvidenceReport:
+      type: object
+      properties:
+        reportId: { type: string, format: uuid }
+        generatedAt: { type: string, format: date-time }
+        requestId: { type: string, format: uuid }
+        document:
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            title: { type: string }
+            fileName: { type: string }
+            checksumSha256: { type: string, nullable: true }
+        mode: { $ref: '#/components/schemas/SigningMode' }
+        status: { $ref: '#/components/schemas/DocumentStatus' }
+        envelope:
+          type: object
+          properties:
+            signers:
+              type: array
+              items:
+                type: object
+                properties:
+                  email: { type: string, format: email }
+                  name: { type: string, nullable: true }
+                  role: { $ref: '#/components/schemas/SignerRole' }
+                  status: { $ref: '#/components/schemas/SignerStatus' }
+                  signedAt: { type: string, format: date-time, nullable: true }
+                  authMethod: { type: string, nullable: true }
+                  signatures:
+                    type: array
+                    items: { $ref: '#/components/schemas/Signature' }
+        auditTrail:
+          type: array
+          items:
+            type: object
+            properties:
+              type: { $ref: '#/components/schemas/SignatureEventType' }
+              at: { type: string, format: date-time }
+              signerId: { type: string, format: uuid, nullable: true }
+              metadata: { type: object, nullable: true }
+              ipAddress: { type: string, nullable: true }
+              userAgent: { type: string, nullable: true }
+        statement: { type: string }
+
+    # --------------------------------------------------------------- audit -
+    AuditOutcome:
+      type: string
+      enum: [SUCCESS, FAILURE, DENIED]
+    AuditLog:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        organizationId: { type: string, format: uuid, nullable: true }
+        actorUserId: { type: string, format: uuid, nullable: true }
+        actorEmail: { type: string, nullable: true }
+        action: { type: string }
+        resourceType: { type: string }
+        resourceId: { type: string, nullable: true }
+        outcome: { $ref: '#/components/schemas/AuditOutcome' }
+        metadata: { type: object, nullable: true }
+        ipAddress: { type: string, nullable: true }
+        userAgent: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+
+    # -------------------------------------------------------------- billing -
+    PlanCode:
+      type: string
+      enum: [COMMUNITY, PROFESSIONAL, BUSINESS, ENTERPRISE]
+    SubscriptionStatus:
+      type: string
+      enum: [TRIALING, ACTIVE, PAST_DUE, CANCELED, UNPAID]
+    Plan:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        code: { $ref: '#/components/schemas/PlanCode' }
+        name: { type: string }
+        description: { type: string, nullable: true }
+        priceMonthly: { type: integer, description: Price in cents (USD) }
+        priceYearly: { type: integer, description: Price in cents (USD) }
+        features: { type: object, nullable: true }
+    BillingAccount:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        organizationId: { type: string, format: uuid }
+        plan: { $ref: '#/components/schemas/PlanCode' }
+        status: { $ref: '#/components/schemas/SubscriptionStatus' }
+        seatsLimit: { type: integer }
+        documentsLimit: { type: integer, nullable: true }
+        storageLimitBytes: { type: integer, nullable: true }
+        features: { type: object, nullable: true }
+        trialEndsAt: { type: string, format: date-time, nullable: true }
+        currentPeriodEnd: { type: string, format: date-time, nullable: true }
+        subscriptions:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string, format: uuid }
+              status: { $ref: '#/components/schemas/SubscriptionStatus' }
+              provider: { type: string, example: stripe }
+              seats: { type: integer }
+              currentPeriodEnd: { type: string, format: date-time, nullable: true }
+              cancelAtPeriodEnd: { type: boolean }
+    Invoice:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        billingAccountId: { type: string, format: uuid }
+        number: { type: string, nullable: true }
+        status: { type: string, enum: [DRAFT, OPEN, PAID, VOID, UNCOLLECTIBLE] }
+        amountDue: { type: integer, description: Cents (USD) }
+        currency: { type: string, default: usd }
+        lineItems: { type: object, nullable: true }
+        issuedAt: { type: string, format: date-time, nullable: true }
+        dueAt: { type: string, format: date-time, nullable: true }
+        paidAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+
+    # -------------------------------------------------------- notifications -
+    Notification:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        type: { type: string }
+        channel: { type: string, enum: [EMAIL, SMS, IN_APP] }
+        title: { type: string }
+        body: { type: string, nullable: true }
+        metadata: { type: object, nullable: true }
+        status: { type: string, enum: [QUEUED, SENT, DELIVERED, FAILED, READ] }
+        createdAt: { type: string, format: date-time }
+        readAt: { type: string, format: date-time, nullable: true }
+
+    # ------------------------------------------------------------- api-keys -
+    ApiKey:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        prefix: { type: string, example: sgn_abcd12 }
+        scopes:
+          type: array
+          items: { type: string }
+        expiresAt: { type: string, format: date-time, nullable: true }
+        lastUsedAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }

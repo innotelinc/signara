@@ -1,0 +1,70 @@
+# Default-deny network policy for the signara namespace: only allow the
+# communication paths the platform actually needs. Stateful backing services
+# are not reachable from outside the namespace.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: signara
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-to-web-api-auth-docs
+  namespace: signara
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values: [web, api, auth, docs]
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector: {} # external ingress controller
+    - from:
+        - podSelector: {} # same-namespace calls (e.g. web -> api via client)
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-api-to-backing-services
+  namespace: signara
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: api
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: postgres
+      ports: [{ port: 5432 }]
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: redis
+      ports: [{ port: 6379 }]
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: minio
+      ports: [{ port: 9000 }]
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: meilisearch
+      ports: [{ port: 7700 }]
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: authentik
+      ports: [{ port: 9000 }]
+    # DNS
+    - to:
+        - namespaceSelector: {}
+      ports: [{ port: 53, protocol: UDP }, { port: 53, protocol: TCP }]

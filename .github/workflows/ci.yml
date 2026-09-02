@@ -1,0 +1,109 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: 22
+
+jobs:
+  lint-typecheck-test:
+    name: Lint · Typecheck · Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Generate Prisma client
+        run: npm run db:generate
+        env:
+          DATABASE_URL: postgresql://signara:signara@localhost:5432/signara
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm run test
+
+      - name: Validate Prisma schema + migration drift
+        run: npx -w @signara/database prisma validate
+
+      - name: Validate OpenAPI specification
+        run: |
+          npx -y @redocly/cli lint openapi/openapi.yaml
+
+  docker-compose-validation:
+    name: Compose config validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate dev compose
+        run: docker compose -f docker-compose.dev.yml config --quiet
+      - name: Validate prod compose
+        run: docker compose -f docker-compose.prod.yml config --quiet
+
+  e2e-smoke:
+    name: API smoke test (against a disposable stack)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: signara
+          POSTGRES_PASSWORD: signara
+          POSTGRES_DB: signara
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U signara"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Migrate
+        run: npm run db:migrate
+        env:
+          DATABASE_URL: postgresql://signara:signara@localhost:5432/signara?schema=public
+      - name: Seed
+        run: npm run db:seed
+        env:
+          DATABASE_URL: postgresql://signara:signara@localhost:5432/signara?schema=public
+      - name: Build API
+        run: npm run build -w @signara/api
+      - name: Boot API and hit /health, /ready, /api/v1/docs
+        run: |
+          node apps/api/dist/main.js &
+          API_PID=$!
+          for i in $(seq 1 30); do
+            curl -fsS http://localhost:8000/health && break || sleep 2
+          done
+          curl -fsS http://localhost:8000/ready
+          curl -fsS -o /dev/null -w "%{http_code} docs\n" http://localhost:8000/api/v1/docs
+          kill $API_PID
+        env:
+          DATABASE_URL: postgresql://signara:signara@localhost:5432/signara?schema=public
+          JWT_ACCESS_SECRET: ci-access-secret
+          JWT_REFRESH_SECRET: ci-refresh-secret
+          OIDC_JWKS_URL: https://dummy.invalid/jwks

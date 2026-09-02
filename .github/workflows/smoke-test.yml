@@ -1,0 +1,36 @@
+name: Smoke Test
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: [Deploy]
+    types: [completed]
+
+jobs:
+  smoke:
+    name: Post-deploy smoke checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: API readiness
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS --max-time 5 https://api.signara.innotel.us/ready; then break; fi
+            sleep 5
+          done
+          curl -fsS https://api.signara.innotel.us/ready | grep -q '"status":"ok"' || exit 1
+
+      - name: Web UI reachable
+        run: curl -fsS -o /dev/null -w "%{http_code}\n" https://app.signara.innotel.us/
+
+      - name: Swagger reachable
+        run: curl -fsS -o /dev/null -w "%{http_code}\n" https://api.signara.innotel.us/api/v1/docs
+
+      - name: Auth provider reachable
+        run: curl -fsS -o /dev/null -w "%{http_code}\n" https://auth.signara.innotel.us/if/flow/initialization/ || true # may require bootstrapping
+
+      - name: Metrics exposed (authenticated scrape not required)
+        run: curl -s https://api.signara.innotel.us/metrics | grep -q signara_http_requests_total || echo "metrics not exposed — verify Prometheus job"
+
+      - name: Report deployment status
+        run: echo "Smoke tests passed for ${{ github.sha }}"

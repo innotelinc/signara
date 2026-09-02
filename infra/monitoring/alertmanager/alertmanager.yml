@@ -1,0 +1,49 @@
+# Alertmanager routing for Signara.
+# Configure receivers with real endpoints via env substitution or edit directly.
+route:
+  receiver: default
+  group_by: ["alertname", "cluster", "service"]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - matchers: ["severity = critical"]
+      receiver: critical
+      continue: false
+    - matchers: ["team = platform"]
+      receiver: platform
+
+receivers:
+  - name: default
+    email_configs:
+      - to: "oncall@signara.innotel.us"
+        from: "alertmanager@signara.innotel.us"
+        smarthost: "smtp.example.com:587"
+        auth_username: "alertmanager@signara.innotel.us"
+        auth_password: "${SMTP_PASSWORD}"
+        require_tls: true
+
+  - name: critical
+    email_configs:
+      - to: "platform-critical@signara.innotel.us"
+        from: "alertmanager@signara.innotel.us"
+        smarthost: "smtp.example.com:587"
+        require_tls: true
+    # Example Slack receiver — uncomment and set webhook URL:
+    # slack_configs:
+    #   - api_url: "${SLACK_WEBHOOK_URL}"
+    #     channel: "#platform-alerts"
+    #     title: "{{ template \"slack.default.title\" . }}"
+    #     text: "{{ template \"slack.default.text\" . }}"
+
+  - name: platform
+    email_configs:
+      - to: "platform@signara.innotel.us"
+        from: "alertmanager@signara.innotel.us"
+        smarthost: "smtp.example.com:587"
+        require_tls: true
+
+inhibit_rules:
+  - source_matchers: ["severity = critical"]
+    target_matchers: ["severity = warning"]
+    equal: ["alertname", "service"]

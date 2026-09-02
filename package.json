@@ -1,0 +1,32 @@
+{
+  "name": "signara",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Signara — Secure Every Signature. Open-source digital document signing and agreement management platform.",
+  "license": "AGPL-3.0-or-later",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
+  },
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "dev": "npm run dev --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "npm run test --workspaces --if-present",
+    "db:generate": "npm run db:generate -w @signara/database",
+    "db:migrate": "npm run db:migrate -w @signara/database",
+    "db:seed": "npm run db:seed -w @signara/database",
+    "db:studio": "npm run db:studio -w @signara/database",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "devDependencies": {
+    "prettier": "^3.3.3",
+    "typescript": "^5.5.4"
+  }
+}
