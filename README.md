@@ -10,9 +10,9 @@ extensibility, and enterprise-grade infrastructure**. Self-hosted by default.
 Multi-tenant by design. Runs on the battle-tested open-source stack of **Next.js, NestJS,
 PostgreSQL, Redis, MinIO, and Meilisearch**.
 
-[![CI](https://github.com/innotelinc/signara/actions/workflows/ci.yml/badge.svg)](https://github.com/innotelinc/signara/actions/workflows/ci.yml)
-[![Release](https://github.com/innotelinc/signara/actions/workflows/release.yml/badge.svg)](https://github.com/innotelinc/signara/actions/workflows/release.yml)
-[![Latest release](https://img.shields.io/github/v/release/innotelinc/signara?color=16a34a)](https://github.com/innotelinc/signara/releases)
+[![CI](https://innotelinc.github.io/signara/actions/workflows/ci.yml/badge.svg)](https://innotelinc.github.io/signara/actions/workflows/ci.yml)
+[![Release](https://innotelinc.github.io/signara/actions/workflows/release.yml/badge.svg)](https://innotelinc.github.io/signara/actions/workflows/release.yml)
+[![Latest release](https://img.shields.io/github/v/release/innotelinc/signara?color=16a34a)](https://innotelinc.github.io/signara/releases)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-or-later-brightgreen.svg)](LICENSE)
 
 </div>
@@ -20,7 +20,7 @@ PostgreSQL, Redis, MinIO, and Meilisearch**.
 > **About Signara** — the open-source e-signature and agreement platform you host yourself:
 > unlimited envelopes, documents on your own S3/MinIO storage, full audit trails, and
 > Authentik as the native identity provider — with signing workflows, templates, approval
-> routing, and an AI assistant built in. **Landing page:** [github.com/innotelinc/signara](https://github.com/innotelinc/signara)
+> routing, and an AI assistant built in. **Landing page:** [innotelinc.github.io/signara](https://innotelinc.github.io/signara)
 
 ---
 
@@ -158,7 +158,7 @@ See [docs/DeveloperGuide.md](docs/DeveloperGuide.md).
 
 The static project landing page is published through GitHub Pages at
 [https://innotelinc.github.io/signara/](https://innotelinc.github.io/signara/). It is
-maintained in [docs/landing/index.html](docs/landing/index.html) and deployed by
+maintained in [web/landing/index.html](web/landing/index.html) and deployed by
 [.github/workflows/pages.yml](.github/workflows/pages.yml). The production Signara
 application remains deployed separately with the operator-run Docker Compose flow.
 
@@ -170,7 +170,7 @@ publish container images with SBOMs. They do not connect to or deploy any server
 Deploy on the target host with the regular operator workflow:
 
 ```bash
-git clone https://github.com/innotelinc/signara.git signara
+git clone https://innotelinc.github.io/signara.git signara
 cd signara
 ./setup.sh --production
 ```
@@ -181,7 +181,7 @@ URL after setup; it does not perform deployment.
 
 ## Community & contribution
 
-- Report issues: https://github.com/innotelinc/signara/issues
+- Report issues: https://innotelinc.github.io/signara/issues
 - Contributing: [CONTRIBUTING.md](CONTRIBUTING.md) (see also [docs/DeveloperGuide.md](docs/DeveloperGuide.md))
 
 ## Security
