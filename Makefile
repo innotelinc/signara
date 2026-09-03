@@ -11,6 +11,7 @@ SHELL := /bin/bash
         up up:dev up:prod down logs ps \
         backup backup:now restore \
         nginx:hosts nginx:cert \
+        cerulean:provision \
         release docs
 
 help: ## Show this help message
@@ -92,8 +93,11 @@ restore: ## Restore the latest backup (interactive)
 nginx:hosts: ## Create/update the four proxy hosts via NGINX Proxy Manager API
 	python3 infra/nginx/npm-proxy-hosts.py --apply
 
-nginx:cert: ## Request the wildcard Let's Encrypt certificate via NPM
+nginx:cert: ## Request the wildcard Let's Encrypt certificate via NPM (legacy path)
 	python3 infra/nginx/npm-proxy-hosts.py --cert-only
+
+cerulean:provision: ## Reconcile Signara DNS, NPM hosts, and TLS through Cerulean
+	python3 infra/cerulean/provision.py --dotenv .env
 
 ## ---- Release -------------------------------------------------------------
 

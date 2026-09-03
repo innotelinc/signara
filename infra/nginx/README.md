@@ -1,5 +1,10 @@
 # NGINX Proxy Manager automation
 
+For new deployments, use the Cerulean integration at
+`../cerulean/provision.py`. It manages DNS, NGINX Proxy Manager hosts, and
+Cerulean-issued wildcard TLS using the host LAN IP, just like the Monarch
+workflow. This script is retained as a legacy direct-NPM/Cloudflare path.
+
 Provisions the four Signara proxy hosts on an NGINX Proxy Manager (NPM) instance
 and requests the wildcard Let's Encrypt certificate for `*.signara.innotel.us`.
 
@@ -16,6 +21,13 @@ Requirements:
 - DNS wildcard record `*.signara.innotel.us` -> NPM host
 - Let's Encrypt DNS-01 provider token (`CF_API_TOKEN` for Cloudflare) for the
   wildcard certificate
+
+Recommended Cerulean setup:
+
+```bash
+CERULEAN_LAN_IP=192.168.1.46
+./setup.sh --production --with-cerulean
+```
 
 Run:
 

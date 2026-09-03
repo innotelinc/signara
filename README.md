@@ -66,8 +66,9 @@ signara/
 │   └── database/               # Prisma schema, migrations, seed
 ├── openapi/                    # Complete OpenAPI 3.1 specification
 ├── infra/
+│   ├── cerulean/               # Cerulean DNS/NPM/TLS reconciliation
 │   ├── monitoring/             # Prometheus, Grafana, Loki, Alertmanager
-│   ├── nginx/                  # NGINX Proxy Manager automation
+│   ├── nginx/                  # Legacy direct NGINX Proxy Manager automation
 │   └── backup/                 # Backup & restore scripts
 ├── docs/                       # Architecture, Security, Deployment, API, guides...
 ├── .github/workflows/          # CI/CD pipelines
@@ -100,7 +101,18 @@ Then open http://localhost:3000 (web), http://localhost:8000/api/v1 (API + Swagg
 ./setup.sh --production           # generates .env + migrates production stack
 ```
 
-See [docs/Deployment.md](docs/Deployment.md) for Compose deployment, ingress, TLS, backups, and operations.
+For automatic DNS, NGINX Proxy Manager hosts, and Cerulean-managed wildcard TLS,
+set `CERULEAN_DNS_API_URL`, `CERULEAN_ADMIN_PASSWORD`, `CERULEAN_BASE_DOMAIN`,
+`CERULEAN_ZONE`, and the host's LAN address in `.env`, then run:
+
+```bash
+./setup.sh --production --with-cerulean
+```
+
+Cerulean uses the host LAN IPv4 address for both DNS A records and NPM upstreams;
+Docker bridge addresses are rejected. See
+[docs/Deployment.md](docs/Deployment.md) for Compose deployment, Cerulean, ingress,
+TLS, backups, and operations.
 
 ## Documentation
 
