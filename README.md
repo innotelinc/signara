@@ -1,16 +1,26 @@
-# Signara — Secure Every Signature.
+<div align="center">
 
-Signara is a modern, open-source digital document signing and agreement management platform
-built to replace proprietary e-signature platforms (DocuSign, Adobe Sign, OpenSign) while
-giving you **complete ownership, privacy, security, compliance, extensibility, and
-enterprise-grade infrastructure**.
+# ✍️ Signara — Secure Every Signature.
 
-Self-hosted by default. Multi-tenant by design. Authentik-native identity. Runs on the
-battle-tested open-source stack of Next.js, NestJS, PostgreSQL, Redis, MinIO, and Meilisearch.
+**Open-source digital document signing & agreement management — self-hosted, multi-tenant, Authentik-native.**
 
-> **Repository:** [github.com/innotelinc/signara](https://github.com/innotelinc/signara)
-> **Landing page:** [innotelinc.github.io/signara](https://innotelinc.github.io/signara/)
-> **License:** AGPL-3.0-or-later
+Signara is a modern replacement for proprietary e-signature platforms (DocuSign, Adobe
+Sign, OpenSign) that gives you **complete ownership, privacy, security, compliance,
+extensibility, and enterprise-grade infrastructure**. Self-hosted by default.
+Multi-tenant by design. Runs on the battle-tested open-source stack of **Next.js, NestJS,
+PostgreSQL, Redis, MinIO, and Meilisearch**.
+
+[![CI](https://github.com/innotelinc/signara/actions/workflows/ci.yml/badge.svg)](https://github.com/innotelinc/signara/actions/workflows/ci.yml)
+[![Release](https://github.com/innotelinc/signara/actions/workflows/release.yml/badge.svg)](https://github.com/innotelinc/signara/actions/workflows/release.yml)
+[![Latest release](https://img.shields.io/github/v/release/innotelinc/signara?color=16a34a)](https://github.com/innotelinc/signara/releases)
+[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-or-later-brightgreen.svg)](LICENSE)
+
+</div>
+
+> **About Signara** — the open-source e-signature and agreement platform you host yourself:
+> unlimited envelopes, documents on your own S3/MinIO storage, full audit trails, and
+> Authentik as the native identity provider — with signing workflows, templates, approval
+> routing, and an AI assistant built in. **Landing page:** [github.com/innotelinc/signara](https://github.com/innotelinc/signara)
 
 ---
 
@@ -41,6 +51,45 @@ battle-tested open-source stack of Next.js, NestJS, PostgreSQL, Redis, MinIO, an
   generation, plain-language explanations.
 - **Certificate integration** — Cerulean, ACME, enterprise PKI, internal CAs.
 
+## 🚀 Quick start
+
+```bash
+cp .env.example .env              # then edit values (or let setup.sh generate secrets)
+./setup.sh                        # validates prerequisites, starts stack, migrates DB
+```
+
+Or step by step (development):
+
+```bash
+npm install
+docker compose -f docker-compose.dev.yml up -d --build
+npm run db:migrate
+npm run db:seed
+```
+
+Then open http://localhost:3000 (web), http://localhost:8000/api/v1 (API + Swagger).
+
+### Production — Docker Compose
+
+```bash
+./setup.sh --production           # generates .env + migrates production stack
+```
+
+For automatic DNS, NGINX Proxy Manager hosts, and Cerulean-managed wildcard TLS, set
+`CERULEAN_DNS_API_URL`, `CERULEAN_ADMIN_PASSWORD`, `CERULEAN_BASE_DOMAIN`,
+`CERULEAN_ZONE`, and the host's LAN address in `.env`, then run:
+
+```bash
+./setup.sh --production --with-cerulean
+```
+
+Cerulean permanently uses the public WAN IPv4 address for Signara DNS A records and the
+host LAN IPv4 address only for NPM upstreams; Docker addresses are rejected. The current
+WAN IP is checked on every normal provisioning run and persisted in `.env` for
+auditability. Prior A/CNAME records for the four Signara hosts are removed before the
+single WAN A record is created. See [docs/Deployment.md](docs/Deployment.md) for Compose
+deployment, Cerulean, ingress, TLS, backups, and operations.
+
 ## Technology stack
 
 | Layer         | Technology                                                      |
@@ -54,6 +103,23 @@ battle-tested open-source stack of Next.js, NestJS, PostgreSQL, Redis, MinIO, an
 | Identity      | Authentik (OIDC / OAuth2 / SAML / SCIM / MFA)                   |
 | Observability | Prometheus, Grafana, Loki, Alertmanager                         |
 | Deployment    | Docker Compose (dev + prod), NGINX Proxy Manager                |
+
+## 📚 Documentation
+
+| Document                                                   | Purpose                                    |
+| ---------------------------------------------------------- | ------------------------------------------ |
+| [docs/Architecture.md](docs/Architecture.md)               | System design, components, data flows      |
+| [docs/Security.md](docs/Security.md)                       | Security baseline, threat model, hardening |
+| [docs/Deployment.md](docs/Deployment.md)                   | Compose, Authentik, NGINX, backups         |
+| [docs/DeveloperGuide.md](docs/DeveloperGuide.md)           | Local dev, conventions, testing            |
+| [docs/API.md](docs/API.md)                                 | API overview + OpenAPI usage               |
+| [docs/UserGuide.md](docs/UserGuide.md)                     | End-user workflows                         |
+| [docs/AdministrationGuide.md](docs/AdministrationGuide.md) | Tenant/billing/monitoring admin            |
+| [docs/DisasterRecovery.md](docs/DisasterRecovery.md)       | RPO/RTO, restore drills, runbooks          |
+
+The interactive API reference is served by the API itself (dev:
+http://localhost:8000/api/v1/docs); the full OpenAPI 3.0.3 spec lives in
+[openapi/openapi.yaml](openapi/openapi.yaml).
 
 ## Repository layout
 
@@ -77,63 +143,6 @@ signara/
 ├── docker-compose.prod.yml     # Production stack
 └── setup.sh                    # One-shot provisioner
 ```
-
-## Quick start (Docker)
-
-```bash
-cp .env.example .env              # then edit values (or let setup.sh generate secrets)
-./setup.sh                        # validates prerequisites, starts stack, migrates DB
-```
-
-Or step by step:
-
-```bash
-npm install
-docker compose -f docker-compose.dev.yml up -d --build
-npm run db:migrate
-npm run db:seed
-```
-
-Then open http://localhost:3000 (web), http://localhost:8000/api/v1 (API + Swagger).
-
-## Quick start (production — Docker Compose)
-
-```bash
-./setup.sh --production           # generates .env + migrates production stack
-```
-
-For automatic DNS, NGINX Proxy Manager hosts, and Cerulean-managed wildcard TLS,
-set `CERULEAN_DNS_API_URL`, `CERULEAN_ADMIN_PASSWORD`, `CERULEAN_BASE_DOMAIN`,
-`CERULEAN_ZONE`, and the host's LAN address in `.env`, then run:
-
-```bash
-./setup.sh --production --with-cerulean
-```
-
-Cerulean permanently uses the public WAN IPv4 address for Signara DNS A records
-and the host LAN IPv4 address only for NPM upstreams; Docker addresses are rejected.
-The current WAN IP is checked on every normal provisioning run and persisted in
-`.env` for auditability. Prior A/CNAME records for the four Signara hosts are
-removed before the single WAN A record is created. See
-[docs/Deployment.md](docs/Deployment.md) for Compose deployment, Cerulean, ingress,
-TLS, backups, and operations.
-
-## Documentation
-
-| Document                                                   | Purpose                                    |
-| ---------------------------------------------------------- | ------------------------------------------ |
-| [docs/Architecture.md](docs/Architecture.md)               | System design, components, data flows      |
-| [docs/Security.md](docs/Security.md)                       | Security baseline, threat model, hardening |
-| [docs/Deployment.md](docs/Deployment.md)                   | Compose, Authentik, NGINX, backups         |
-| [docs/DeveloperGuide.md](docs/DeveloperGuide.md)           | Local dev, conventions, testing            |
-| [docs/API.md](docs/API.md)                                 | API overview + OpenAPI usage               |
-| [docs/UserGuide.md](docs/UserGuide.md)                     | End-user workflows                         |
-| [docs/AdministrationGuide.md](docs/AdministrationGuide.md) | Tenant/billing/monitoring admin            |
-| [docs/DisasterRecovery.md](docs/DisasterRecovery.md)       | RPO/RTO, restore drills, runbooks          |
-
-The interactive API reference is served by the API itself
-(dev: http://localhost:8000/api/v1/docs); the full OpenAPI 3.0.3 spec lives in
-[openapi/openapi.yaml](openapi/openapi.yaml).
 
 ## Development
 
@@ -166,15 +175,14 @@ cd signara
 ./setup.sh --production
 ```
 
-Use `./setup.sh --production --with-cerulean` when Cerulean should provision DNS,
-NGINX Proxy Manager hosts, and TLS. The optional manual smoke workflow can verify a
-deployed API URL after setup; it does not perform deployment.
+Use `./setup.sh --production --with-cerulean` when Cerulean should provision DNS, NGINX
+Proxy Manager hosts, and TLS. The optional manual smoke workflow can verify a deployed API
+URL after setup; it does not perform deployment.
 
 ## Community & contribution
 
 - Report issues: https://github.com/innotelinc/signara/issues
 - Contributing: [CONTRIBUTING.md](CONTRIBUTING.md) (see also [docs/DeveloperGuide.md](docs/DeveloperGuide.md))
-- Code of conduct: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
 
 ## Security
 
@@ -183,4 +191,4 @@ for the responsible-disclosure policy.
 
 ---
 
-Signara — Secure Every Signature. © 2026
+*Signara — Secure Every Signature. © 2026*
