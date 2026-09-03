@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ---- base ----------------------------------------------------------------
-FROM node:22-alpine AS base
+FROM node:26-alpine AS base
 RUN apk add --no-cache libc6-compat openssl
 WORKDIR /app
 ENV NODE_ENV=production
@@ -23,7 +23,7 @@ RUN npm run build -w @signara/api
 RUN npm prune --omit=dev
 
 # ---- runtime -------------------------------------------------------------
-FROM node:22-alpine AS runner
+FROM node:26-alpine AS runner
 RUN apk add --no-cache libc6-compat openssl dumb-init && addgroup -S signara && adduser -S signara -G signara
 WORKDIR /app
 ENV NODE_ENV=production
