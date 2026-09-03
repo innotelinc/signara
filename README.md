@@ -9,6 +9,7 @@ Self-hosted by default. Multi-tenant by design. Authentik-native identity. Runs 
 battle-tested open-source stack of Next.js, NestJS, PostgreSQL, Redis, MinIO, and Meilisearch.
 
 > **Repository:** [github.com/innotelinc/signara](https://github.com/innotelinc/signara)
+> **Landing page:** [innotelinc.github.io/signara](https://innotelinc.github.io/signara/)
 > **License:** AGPL-3.0-or-later
 
 ---
@@ -143,6 +144,14 @@ make dev     # API on :8000, web on :3000, with the rest of the stack via `make 
 ```
 
 See [docs/DeveloperGuide.md](docs/DeveloperGuide.md).
+
+## Hosted landing page
+
+The static project landing page is published through GitHub Pages at
+[https://innotelinc.github.io/signara/](https://innotelinc.github.io/signara/). It is
+maintained in [docs/landing/index.html](docs/landing/index.html) and deployed by
+[.github/workflows/pages.yml](.github/workflows/pages.yml). The production Signara
+application remains deployed separately with the operator-run Docker Compose flow.
 
 ## Automation and deployment
 
