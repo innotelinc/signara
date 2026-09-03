@@ -49,6 +49,8 @@ jobs:
 
       - name: Validate Prisma schema + migration drift
         run: npx -w @signara/database prisma validate
+        env:
+          DATABASE_URL: postgresql://signara:signara@localhost:5432/signara?schema=public
 
       - name: Validate OpenAPI specification
         run: |
@@ -59,6 +61,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Create CI environment file
+        run: cp .env.example .env
       - name: Validate dev compose
         run: docker compose -f docker-compose.dev.yml config --quiet
       - name: Validate prod compose
@@ -87,6 +91,10 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
       - run: npm ci --no-audit --no-fund
+      - name: Generate Prisma client
+        run: npm run db:generate
+        env:
+          DATABASE_URL: postgresql://signara:signara@localhost:5432/signara?schema=public
       - name: Migrate
         run: npm run db:migrate
         env:
