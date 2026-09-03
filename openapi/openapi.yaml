@@ -1,4 +1,4 @@
-openapi: 3.1.0
+openapi: 3.0.3
 info:
   title: Signara API
   version: 1.0.0
@@ -32,7 +32,7 @@ info:
     email: support@signara.innotel.us
   license:
     name: AGPL-3.0-or-later
-    identifier: AGPL-3.0-or-later
+    url: https://www.gnu.org/licenses/agpl-3.0.txt
 servers:
   - url: https://api.signara.innotel.us/api/v1
     description: Production
@@ -1085,8 +1085,8 @@ paths:
               required: [certificatePem]
               properties:
                 certificatePem: { type: string, description: End-entity certificate in PEM }
-                chainPem: { type: string, description: Intermediates + root (PEM), optional }
-                privateKeyPem: { type: string, description: Signing private key (PEM), optional — encrypted at rest }
+                chainPem: { type: string, description: 'Intermediates + root (PEM), optional' }
+                privateKeyPem: { type: string, description: 'Signing private key (PEM), optional — encrypted at rest' }
                 provider: { $ref: '#/components/schemas/CertificateProvider' }
                 validationLevel: { type: string, enum: [DV, OV, EV] }
                 commonName: { type: string }
@@ -1113,7 +1113,7 @@ paths:
                 provider: { $ref: '#/components/schemas/CertificateProvider' }
                 commonName: { type: string, description: Subject CN — signer email for person certificates }
                 email: { type: string, format: email }
-                options: { type: object, description: Provider-specific (ACME dns handler, Cerulean template, ...) }
+                options: { type: object, description: 'Provider-specific (ACME dns handler, Cerulean template, ...)' }
       responses:
         '201':
           description: Provisioned and stored certificate
