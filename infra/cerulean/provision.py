@@ -10,11 +10,13 @@ Required environment variables:
     CERULEAN_ADMIN_PASSWORD  Cerulean administrator password
     CERULEAN_BASE_DOMAIN     public suffix, default signara.innotel.us
     CERULEAN_LAN_IP           host LAN address NPM should forward to
+    CERULEAN_WAN_IP           public IPv4 address used by DNS A records
 
 Optional:
     CERULEAN_ZONE            managed parent zone, default innotel.us
     CERULEAN_CERT_TIMEOUT    certificate wait timeout in seconds, default 900
     CERULEAN_RENEW_DAYS      renew when expiry is within this many days, 30
+    CERULEAN_WAN_DISCOVERY_URL public-IP endpoint, default https://api.ipify.org
 
 Use --dry-run to validate the host map and print the planned workflow without
 calling Cerulean. The API client uses only Python's standard library.
@@ -38,6 +40,7 @@ DEFAULT_API_URL = "http://localhost:3003"
 DEFAULT_BASE_DOMAIN = "signara.innotel.us"
 DEFAULT_ZONE = "innotel.us"
 DEFAULT_HOSTS_FILE = Path(__file__).with_name("hosts.conf")
+DEFAULT_WAN_DISCOVERY_URL = "https://api.ipify.org"
 
 
 class CeruleanError(RuntimeError):
@@ -148,6 +151,44 @@ def validate_lan_ip(value: str) -> str:
             f"CERULEAN_LAN_IP points to a Docker/virtual interface: {value!r}"
         )
     return value
+
+
+def validate_wan_ip(value: str) -> str:
+    """Require a globally routable public IPv4 address for DNS records."""
+    value = value.strip()
+    try:
+        address = ipaddress.ip_address(value)
+    except ValueError:
+        raise ValueError(f"CERULEAN_WAN_IP must be a public IPv4 address, got {value!r}") from None
+    if address.version != 4 or not address.is_global:
+        raise ValueError(
+            f"CERULEAN_WAN_IP must be a public WAN IPv4 address, got {value!r}"
+        )
+    return value
+
+
+def detect_wan_ip(url: str) -> str:
+    """Discover the public IPv4 address without using a local interface address."""
+    request = urllib.request.Request(url, headers={"Accept": "text/plain"})
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            value = response.read().decode("utf-8", "replace").strip()
+    except (OSError, urllib.error.URLError) as error:
+        raise ValueError(f"could not detect the public WAN IP from {url}: {error}") from None
+    return validate_wan_ip(value)
+
+
+def persist_env_value(path: Path, key: str, value: str) -> None:
+    """Persist an automatically discovered value without exposing or overwriting secrets."""
+    lines = path.read_text(encoding="utf-8").splitlines() if path.is_file() else []
+    prefix = f"{key}="
+    for index, line in enumerate(lines):
+        if line.startswith(prefix):
+            lines[index] = f"{prefix}{value}"
+            path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            return
+    lines.append(f"{prefix}{value}")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def detect_forward_host() -> str | None:
@@ -265,40 +306,56 @@ class CeruleanClient:
     def list_records(self, domain_id: int) -> list[dict[str, Any]]:
         return self.request("GET", f"/api/domains/{domain_id}/records") or []
 
-    def upsert_a_record(self, domain_id: int, relative_name: str, fqdn: str, address: str) -> str:
+    def reconcile_dns_record(
+        self, domain_id: int, relative_name: str, fqdn: str, address: str
+    ) -> str:
+        """Ensure an exact Signara hostname has only one public WAN A record.
+
+        Older runs could leave LAN A records or conflicting CNAMEs behind. Remove
+        every A/CNAME at the exact hostname before creating the desired record;
+        unrelated records in the parent zone are never touched.
+        """
         if self.dry_run:
-            self.planned.append(f"reconcile A {fqdn} -> {address}")
+            self.planned.append(
+                f"remove prior A/CNAME records at {fqdn} and add A {fqdn} -> {address}"
+            )
             return "planned"
 
         def normalized(value: Any) -> str:
             return str(value or "").lower().rstrip(".")
 
-        for record in self.list_records(domain_id):
-            if record.get("type") != "A" or normalized(record.get("name")) != normalized(fqdn):
-                continue
+        records = self.list_records(domain_id)
+        matching = [
+            record
+            for record in records
+            if str(record.get("type", "")).upper() in {"A", "CNAME"}
+            and normalized(record.get("name")) == normalized(fqdn)
+        ]
+        desired = [
+            record
+            for record in matching
+            if str(record.get("type", "")).upper() == "A"
+            and str(record.get("value", "")).strip() == address
+        ]
+        if len(matching) == 1 and len(desired) == 1:
+            return "unchanged"
+
+        for record in matching:
+            record_type = str(record.get("type", "")).upper()
             current = str(record.get("value") or "").strip()
-            if current == address:
-                return "unchanged"
             self.mutate(
-                f"delete A {fqdn} ({current})",
+                f"delete {record_type} {fqdn} ({current})",
                 "DELETE",
                 f"/api/domains/{domain_id}/records",
-                {"type": "A", "name": relative_name, "value": current},
+                {"type": record_type, "name": relative_name, "value": current},
             )
-            self.mutate(
-                f"add A {fqdn} -> {address}",
-                "POST",
-                f"/api/domains/{domain_id}/records",
-                {"type": "A", "name": relative_name, "value": address, "ttl": 300},
-            )
-            return "updated"
         self.mutate(
             f"add A {fqdn} -> {address}",
             "POST",
             f"/api/domains/{domain_id}/records",
             {"type": "A", "name": relative_name, "value": address, "ttl": 300},
         )
-        return "added"
+        return "updated" if matching else "added"
 
     def list_hosts(self) -> list[dict[str, Any]]:
         return self.request("GET", "/api/npm/hosts") or []
@@ -411,7 +468,8 @@ def main() -> int:
     parser.add_argument("--api-url")
     parser.add_argument("--base-domain")
     parser.add_argument("--zone")
-    parser.add_argument("--lan-ip", "--forward-host", dest="lan_ip", help="host LAN IPv4 address used by DNS and NPM")
+    parser.add_argument("--lan-ip", "--forward-host", dest="lan_ip", help="host LAN IPv4 address used only by NPM upstreams")
+    parser.add_argument("--wan-ip", dest="wan_ip", help="explicit public WAN IPv4 address used only by DNS A records")
     parser.add_argument("--renew-days", type=int)
     parser.add_argument("--cert-timeout", type=int)
     parser.add_argument("--dry-run", action="store_true")
@@ -425,6 +483,7 @@ def main() -> int:
     password = os.environ.get("CERULEAN_ADMIN_PASSWORD", "")
     base_domain = (args.base_domain or os.environ.get("CERULEAN_BASE_DOMAIN", DEFAULT_BASE_DOMAIN)).lower().rstrip(".")
     configured_lan_ip = args.lan_ip or os.environ.get("CERULEAN_LAN_IP", "")
+    configured_wan_ip = args.wan_ip or ""
     if configured_lan_ip:
         try:
             forward_host = validate_lan_ip(configured_lan_ip)
@@ -435,6 +494,22 @@ def main() -> int:
         forward_host = detect_forward_host()
         if forward_host:
             forward_host = validate_lan_ip(forward_host)
+    if configured_wan_ip:
+        try:
+            dns_address = validate_wan_ip(configured_wan_ip)
+        except ValueError as error:
+            print(f"error: {error}", file=sys.stderr)
+            return 2
+    else:
+        try:
+            dns_address = detect_wan_ip(
+                os.environ.get("CERULEAN_WAN_DISCOVERY_URL", DEFAULT_WAN_DISCOVERY_URL)
+            )
+        except ValueError as error:
+            print(f"error: {error}", file=sys.stderr)
+            return 2
+    if not args.dry_run:
+        persist_env_value(args.dotenv, "CERULEAN_WAN_IP", dns_address)
     renew_days = args.renew_days if args.renew_days is not None else int(os.environ.get("CERULEAN_RENEW_DAYS", "30"))
     cert_timeout = args.cert_timeout if args.cert_timeout is not None else int(os.environ.get("CERULEAN_CERT_TIMEOUT", "900"))
 
@@ -458,7 +533,8 @@ def main() -> int:
         zone_row = client.ensure_domain(zone)
         print(f"Cerulean: {api_url}")
         print(f"Domain: *.{base_domain} (managed zone: {zone})")
-        print(f"Forward: {forward_host} ({len(entries)} hosts)")
+        print(f"DNS A records: {dns_address}")
+        print(f"NPM upstreams: {forward_host} ({len(entries)} hosts)")
 
         if not args.skip_dns:
             zone_id = zone_row.get("id")
@@ -466,10 +542,11 @@ def main() -> int:
                 raise CeruleanError(f"Cerulean returned no id for managed zone {zone}")
             for entry in entries:
                 domain = f"{entry.subdomain}.{base_domain}"
-                action = client.upsert_a_record(
-                    int(zone_id or 0), relative_name(domain, zone), domain, forward_host
+                action = client.reconcile_dns_record(
+                    int(zone_id or 0), relative_name(domain, zone), domain, dns_address
                 )
-                print(f"DNS A {domain} -> {forward_host}: {action}")
+                print(f"DNS A {domain} -> {dns_address}: {action}")
+
         else:
             print("DNS: skipped")
 
