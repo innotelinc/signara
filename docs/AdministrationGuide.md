@@ -7,23 +7,23 @@ owners/administrators.
 
 ### Platform roles
 
-| Role | Scope | Grants |
-| --- | --- | --- |
-| `USER` | platform-wide least privilege | default for everyone |
-| `PLATFORM_ADMIN` | all tenants | `/admin/*`, cross-tenant metrics, suspend orgs/users |
+| Role             | Scope                         | Grants                                               |
+| ---------------- | ----------------------------- | ---------------------------------------------------- |
+| `USER`           | platform-wide least privilege | default for everyone                                 |
+| `PLATFORM_ADMIN` | all tenants                   | `/admin/*`, cross-tenant metrics, suspend orgs/users |
 
 `PLATFORM_ADMIN` is derived from the Authentik group `signara-admins` (token
 `groups` claim; configurable via `IDP_ADMIN_GROUP`).
 
 ### Organization roles
 
-| Role | Typical duties |
-| --- | --- |
-| `OWNER` | everything in the org; cannot be removed |
-| `ADMIN` | org settings, members, billing |
-| `MANAGER` | send documents, manage templates, teams |
+| Role      | Typical duties                             |
+| --------- | ------------------------------------------ |
+| `OWNER`   | everything in the org; cannot be removed   |
+| `ADMIN`   | org settings, members, billing             |
+| `MANAGER` | send documents, manage templates, teams    |
 | `AUDITOR` | read-only + audit export, evidence reports |
-| `MEMBER` | upload/sign personal documents |
+| `MEMBER`  | upload/sign personal documents             |
 
 Fine-grained **permission codes** (seeded in `packages/database/prisma/seed.ts`)
 are attached to roles via `Role → RolePermission → Permission`. Custom
@@ -74,7 +74,7 @@ features or UI displays.
   permission codes (`documents.read`, `signing.send`, …).
 - Rate limits: tune `RATE_LIMIT_WINDOW_MS` / `RATE_LIMIT_MAX` per deployment;
   consider tightening login-scoped limits further.
-- Secrets: see Security.md § 6 (env, K8s External Secrets, rotation).
+- Secrets: see Security.md § 6 (environment file permissions, host secret manager, rotation).
 
 ## 6. Escalations & reminders
 
@@ -85,12 +85,12 @@ features or UI displays.
 
 ## 7. Observability for admins
 
-| Tool | Where | Use |
-| --- | --- | --- |
-| Grafana | `monitoring./signara.innotel.us` (or :3001) | dashboards: API, queues, storage, backups |
-| Prometheus | :9090 | query & rule evaluation |
-| Alertmanager | :9093 | routes alerts (email/Slack/PagerDuty) |
-| Loki | :3100 | log search (correlate by `requestId`) |
+| Tool         | Where                                       | Use                                       |
+| ------------ | ------------------------------------------- | ----------------------------------------- |
+| Grafana      | `monitoring./signara.innotel.us` (or :3001) | dashboards: API, queues, storage, backups |
+| Prometheus   | :9090                                       | query & rule evaluation                   |
+| Alertmanager | :9093                                       | routes alerts (email/Slack/PagerDuty)     |
+| Loki         | :3100                                       | log search (correlate by `requestId`)     |
 
 Alerts to monitor (rules in `infra/monitoring/prometheus/rules.yml`):
 API 5xx > 5%, queue failure rate > 10%, certificate < 14 days, storage > 85%,

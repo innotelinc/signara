@@ -15,14 +15,14 @@ battle-tested open-source stack of Next.js, NestJS, PostgreSQL, Redis, MinIO, an
 
 ## Why Signara
 
-| Problem | Signara answer |
-| --- | --- |
-| Proprietary lock-in and per-envelope pricing | Open source, self-hosted, unlimited envelopes |
-| Documents stored on someone else's servers | Your MinIO/S3 storage, your encryption keys |
-| Opaque audit trails | Full signing history, IP/timestamp evidence reports |
-| Identity you don't control | Authentik as the native IdP — OIDC, OAuth2, SAML, SCIM, MFA, RBAC |
-| Single-tenant SaaS limitations | Organizations → Workspaces → Teams with delegated admin |
-| No automation | Templates, sequential/parallel routing, approval workflows, API-first |
+| Problem                                      | Signara answer                                                        |
+| -------------------------------------------- | --------------------------------------------------------------------- |
+| Proprietary lock-in and per-envelope pricing | Open source, self-hosted, unlimited envelopes                         |
+| Documents stored on someone else's servers   | Your MinIO/S3 storage, your encryption keys                           |
+| Opaque audit trails                          | Full signing history, IP/timestamp evidence reports                   |
+| Identity you don't control                   | Authentik as the native IdP — OIDC, OAuth2, SAML, SCIM, MFA, RBAC     |
+| Single-tenant SaaS limitations               | Organizations → Workspaces → Teams with delegated admin               |
+| No automation                                | Templates, sequential/parallel routing, approval workflows, API-first |
 
 ## Feature overview
 
@@ -42,17 +42,17 @@ battle-tested open-source stack of Next.js, NestJS, PostgreSQL, Redis, MinIO, an
 
 ## Technology stack
 
-| Layer | Technology |
-| --- | --- |
-| Frontend | Next.js 14, TypeScript, TailwindCSS, shadcn/ui-style components |
-| Backend | NestJS 10, TypeScript |
-| Data | PostgreSQL (Prisma ORM), Redis |
-| Storage | MinIO / S3-compatible |
-| Search | Meilisearch |
-| Jobs | BullMQ (Redis queues) |
-| Identity | Authentik (OIDC / OAuth2 / SAML / SCIM / MFA) |
-| Observability | Prometheus, Grafana, Loki, Alertmanager |
-| Deployment | Docker Compose (dev + prod), Kubernetes, NGINX Proxy Manager |
+| Layer         | Technology                                                      |
+| ------------- | --------------------------------------------------------------- |
+| Frontend      | Next.js 14, TypeScript, TailwindCSS, shadcn/ui-style components |
+| Backend       | NestJS 10, TypeScript                                           |
+| Data          | PostgreSQL (Prisma ORM), Redis                                  |
+| Storage       | MinIO / S3-compatible                                           |
+| Search        | Meilisearch                                                     |
+| Jobs          | BullMQ (Redis queues)                                           |
+| Identity      | Authentik (OIDC / OAuth2 / SAML / SCIM / MFA)                   |
+| Observability | Prometheus, Grafana, Loki, Alertmanager                         |
+| Deployment    | Docker Compose (dev + prod), NGINX Proxy Manager                |
 
 ## Repository layout
 
@@ -66,7 +66,6 @@ signara/
 │   └── database/               # Prisma schema, migrations, seed
 ├── openapi/                    # Complete OpenAPI 3.1 specification
 ├── infra/
-│   ├── kubernetes/             # Deployments, services, ingress, HPA
 │   ├── monitoring/             # Prometheus, Grafana, Loki, Alertmanager
 │   ├── nginx/                  # NGINX Proxy Manager automation
 │   └── backup/                 # Backup & restore scripts
@@ -98,30 +97,23 @@ Then open http://localhost:3000 (web), http://localhost:8000/api/v1 (API + Swagg
 ## Quick start (production — Docker Compose)
 
 ```bash
-./setup.sh                        # generates .env + migrates
-docker compose -f docker-compose.prod.yml up -d --build
+./setup.sh --production           # generates .env + migrates production stack
 ```
 
-## Quick start (Kubernetes)
-
-```bash
-kubectl apply -k infra/kubernetes/base
-```
-
-See [docs/Deployment.md](docs/Deployment.md) for ingress, TLS, backups, and HA details.
+See [docs/Deployment.md](docs/Deployment.md) for Compose deployment, ingress, TLS, backups, and operations.
 
 ## Documentation
 
-| Document | Purpose |
-| --- | --- |
-| [docs/Architecture.md](docs/Architecture.md) | System design, components, data flows |
-| [docs/Security.md](docs/Security.md) | Security baseline, threat model, hardening |
-| [docs/Deployment.md](docs/Deployment.md) | Compose, K8s, Authentik, NGINX, backups |
-| [docs/DeveloperGuide.md](docs/DeveloperGuide.md) | Local dev, conventions, testing |
-| [docs/API.md](docs/API.md) | API overview + OpenAPI usage |
-| [docs/UserGuide.md](docs/UserGuide.md) | End-user workflows |
-| [docs/AdministrationGuide.md](docs/AdministrationGuide.md) | Tenant/billing/monitoring admin |
-| [docs/DisasterRecovery.md](docs/DisasterRecovery.md) | RPO/RTO, restore drills, runbooks |
+| Document                                                   | Purpose                                    |
+| ---------------------------------------------------------- | ------------------------------------------ |
+| [docs/Architecture.md](docs/Architecture.md)               | System design, components, data flows      |
+| [docs/Security.md](docs/Security.md)                       | Security baseline, threat model, hardening |
+| [docs/Deployment.md](docs/Deployment.md)                   | Compose, Authentik, NGINX, backups         |
+| [docs/DeveloperGuide.md](docs/DeveloperGuide.md)           | Local dev, conventions, testing            |
+| [docs/API.md](docs/API.md)                                 | API overview + OpenAPI usage               |
+| [docs/UserGuide.md](docs/UserGuide.md)                     | End-user workflows                         |
+| [docs/AdministrationGuide.md](docs/AdministrationGuide.md) | Tenant/billing/monitoring admin            |
+| [docs/DisasterRecovery.md](docs/DisasterRecovery.md)       | RPO/RTO, restore drills, runbooks          |
 
 The interactive API reference is served by the API itself
 (dev: http://localhost:8000/api/v1/docs); the full OpenAPI 3.1 spec lives in

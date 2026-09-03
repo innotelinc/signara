@@ -2,7 +2,7 @@ import { Body, Controller, Get, Param, Patch, Query } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { IsEnum } from 'class-validator';
 import { AdminService } from './admin.service';
-import { CurrentUser, TenantRequired } from '../../common/decorators';
+import { CurrentUser } from '../../common/decorators';
 import { AuthenticatedUser } from '../../common/types';
 
 class OrgStatusDto {
@@ -15,7 +15,6 @@ class UserStatusDto {
 
 @ApiTags('admin')
 @Controller('admin')
-@TenantRequired()
 export class AdminController {
   constructor(private readonly admin: AdminService) {}
 
@@ -55,13 +54,21 @@ export class AdminController {
 
   @Patch('organizations/:id/status')
   @ApiOperation({ summary: 'Suspend/activate a tenant organization' })
-  setOrgStatus(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: OrgStatusDto) {
+  setOrgStatus(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: OrgStatusDto,
+  ) {
     return this.admin.setOrganizationStatus(user, id, dto.status);
   }
 
   @Patch('users/:id/status')
   @ApiOperation({ summary: 'Suspend/activate a user account' })
-  setUserStatus(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: UserStatusDto) {
+  setUserStatus(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: UserStatusDto,
+  ) {
     return this.admin.setUserStatus(user, id, dto.status);
   }
 

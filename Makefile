@@ -9,7 +9,6 @@ SHELL := /bin/bash
 .PHONY: help install dev dev:api dev:web build lint test typecheck \
         db:generate db:migrate db:seed db:studio \
         up up:dev up:prod down logs ps \
-        k8s:apply k8s:delete k8s:status \
         backup backup:now restore \
         nginx:hosts nginx:cert \
         release docs
@@ -78,17 +77,6 @@ logs: ## Tail logs from all services
 ps: ## List service status
 	docker compose -f docker-compose.dev.yml ps
 
-## ---- Kubernetes ----------------------------------------------------------
-
-k8s:apply: ## Apply all Kubernetes manifests (namespace, secrets, deployments...)
-	kubectl apply -k infra/kubernetes/base
-
-k8s:delete: ## Delete all Kubernetes manifests
-	kubectl delete -k infra/kubernetes/base
-
-k8s:status: ## Show pod/deployment status
-	kubectl get pods,deployments,svc,ingress -n signara
-
 ## ---- Backup / Restore ----------------------------------------------------
 
 backup: ## Run the backup job (Postgres + MinIO) against the production stack
@@ -101,7 +89,7 @@ restore: ## Restore the latest backup (interactive)
 
 ## ---- NGINX Proxy Manager automation --------------------------------------
 
-nginx:hosts: ## Create/update the five proxy hosts via NGINX Proxy Manager API
+nginx:hosts: ## Create/update the four proxy hosts via NGINX Proxy Manager API
 	python3 infra/nginx/npm-proxy-hosts.py --apply
 
 nginx:cert: ## Request the wildcard Let's Encrypt certificate via NPM

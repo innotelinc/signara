@@ -39,7 +39,10 @@ export function NewTemplateClient() {
 
   return (
     <div className="mx-auto max-w-xl">
-      <Link href="/templates" className="mb-4 inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-700">
+      <Link
+        href="/templates"
+        className="mb-4 inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-700"
+      >
         <ArrowLeft className="h-4 w-4" />
         Back to templates
       </Link>
@@ -50,12 +53,16 @@ export function NewTemplateClient() {
             <FileSignature className="h-4 w-4" />
             New template
           </CardTitle>
-          <CardDescription>Create a reusable signing workflow — you'll place fields on the next screen.</CardDescription>
+          <CardDescription>
+            Create a reusable signing workflow — you&apos;ll place fields on the next screen.
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={(e) => void create(e)} className="space-y-5">
             {error && (
-              <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
+              <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {error}
+              </div>
             )}
             <div>
               <label className="label" htmlFor="template-name">

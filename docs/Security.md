@@ -5,13 +5,13 @@
 
 ## 1. Threat model (summary)
 
-| Asset | Primary threats | Controls |
-| --- | --- | --- |
+| Asset            | Primary threats                         | Controls                                                                                                               |
+| ---------------- | --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | Signed documents | Theft, tampering, unauthorized download | Envelope encryption at rest, tenant-scoped access, presigned short-lived URLs, SHA-256 checksums, version immutability |
-| Signer identity | Impersonation, replay | Authentik MFA, unguessable per-signer tokens, IP/UA capture, optional cert-backed signatures |
-| Audit trail | Forgery, deletion | Append-only writes (API contract + DB RLS-ready), hashes, export retention |
-| Tenant data | Cross-tenant leakage | organizationId scoping at DB + API + search layers; network policies |
-| Credentials | Exfiltration | httpOnly/Secure cookies, hashed refresh tokens, hashed API keys, secrets vaulting |
+| Signer identity  | Impersonation, replay                   | Authentik MFA, unguessable per-signer tokens, IP/UA capture, optional cert-backed signatures                           |
+| Audit trail      | Forgery, deletion                       | Append-only writes (API contract + DB RLS-ready), hashes, export retention                                             |
+| Tenant data      | Cross-tenant leakage                    | organizationId scoping at DB + API + search layers; private Compose network boundaries                                 |
+| Credentials      | Exfiltration                            | httpOnly/Secure cookies, hashed refresh tokens, hashed API keys, secrets vaulting                                      |
 
 ## 2. Authentication & sessions
 
@@ -55,29 +55,28 @@
   `DocumentVersion`; signing binds content via SHA-256 over
   `document || signer || request`.
 - **In transit:** TLS 1.2+ only, HSTS preload; internal service traffic inside
-  the private network (K8s NetworkPolicies default-deny).
+  the private Docker Compose network.
 - **Retention:** configurable; see DisasterRecovery for backup encryption.
 
 ## 5. Application hardening
 
-| Control | Implementation |
-| --- | --- |
-| CSP | `default-src 'self'` + report-uri to `/api/v1/audit/csp-report` (see `main.ts`) |
-| Headers | X-Frame-Options DENY, X-Content-Type-Options nosniff, Referrer-Policy, Permissions-Policy, HSTS |
-| Rate limiting | Global 100 req/min/user (env-tunable); tighter limits on auth endpoints |
-| Input validation | Global `ValidationPipe` (whitelist + forbid unknown) |
-| Error handling | Unified envelope; no stack traces or internals leaked |
-| Upload safety | Type allowlist (PDF/DOCX/PNG/JPEG/WebP), 50 MB cap, magic-byte validation recommended |
-| Secrets | Never in code/git; `.env` ignored; K8s via `External Secrets`/SOPS |
-| Cookies | See § 2 |
-| Dependency hygiene | npm audit in CI, Dependabot, nightly Grype container scans, SBOM per release |
+| Control            | Implementation                                                                                  |
+| ------------------ | ----------------------------------------------------------------------------------------------- |
+| CSP                | `default-src 'self'` + report-uri to `/api/v1/audit/csp-report` (see `main.ts`)                 |
+| Headers            | X-Frame-Options DENY, X-Content-Type-Options nosniff, Referrer-Policy, Permissions-Policy, HSTS |
+| Rate limiting      | Global 100 req/min/user (env-tunable); tighter limits on auth endpoints                         |
+| Input validation   | Global `ValidationPipe` (whitelist + forbid unknown)                                            |
+| Error handling     | Unified envelope; no stack traces or internals leaked                                           |
+| Upload safety      | Type allowlist (PDF/DOCX/PNG/JPEG/WebP), 50 MB cap, magic-byte validation recommended           |
+| Secrets            | Never in code/git; `.env` ignored; use a host secret manager for production                     |
+| Cookies            | See § 2                                                                                         |
+| Dependency hygiene | npm audit in CI, Dependabot, nightly Grype container scans, SBOM per release                    |
 
 ## 6. Secrets management
 
 - Local/Docker: `.env` (gitignored), generated strong secrets via `setup.sh`.
-- Kubernetes: apply Secret from env-file or use
-  `external-secrets`/`sealed-secrets`; example manifest is
-  `infra/kubernetes/base/secrets.example.yaml` (never commit real values).
+- Production Compose: keep `.env` outside source control and restrict file
+  permissions; use a host secret manager where available.
 - Rotation: `CRYPTO_MASTER_KEY`, JWT secrets, OIDC client secret, MinIO
   credentials, Redis password, Postgres password. Document rotation procedures
   in the runbook section of DisasterRecovery.md.
@@ -93,11 +92,11 @@
 
 ## 8. Infrastructure security
 
-- Docker images run as **non-root** (`signara` user), `dumb-init`, read-only
-  root FS (K8s), all capabilities dropped, seccomp RuntimeDefault.
-- Network policies default-deny; only required ports between pods.
-- NPM/ingress: force HTTPS, block common exploits, security headers on all
-  five subdomains (see `infra/nginx/npm-proxy-hosts.py`).
+- Docker images run as **non-root** (`signara` user) with `dumb-init`.
+- Compose services use private service networking; publish only the reverse
+  proxy and explicitly required administration ports.
+- NGINX Proxy Manager: force HTTPS, block common exploits, and apply security
+  headers on all five subdomains (see `infra/nginx/npm-proxy-hosts.py`).
 - Monitoring endpoints (`/metrics`, `/ready`) are service-internal; the proxy
   denies external access to `/metrics`.
 

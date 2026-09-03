@@ -1,4 +1,9 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { FieldType, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthenticatedUser } from '../../common/types';
@@ -24,14 +29,23 @@ export class TemplatesService {
 
   async create(
     user: AuthenticatedUser,
-    data: { name: string; description?: string; workspaceId?: string; variables?: Record<string, string>; fields?: TemplateFieldInput[] },
+    data: {
+      name: string;
+      description?: string;
+      workspaceId?: string;
+      variables?: Record<string, string>;
+      fields?: TemplateFieldInput[];
+    },
   ) {
     const orgId = user.org?.id;
     if (!orgId) throw new ForbiddenException('No active tenant');
 
     if ((data.fields?.length ?? 0) > MAX_FIELDS_PER_TEMPLATE) {
-      throw new Error(`A template may define at most ${MAX_FIELDS_PER_TEMPLATE} fields`);
+      throw new BadRequestException(
+        `A template may define at most ${MAX_FIELDS_PER_TEMPLATE} fields`,
+      );
     }
+    if (data.workspaceId) await this.assertWorkspaceInTenant(orgId, data.workspaceId);
 
     return this.prisma.template.create({
       data: {
@@ -41,15 +55,21 @@ export class TemplatesService {
         description: data.description,
         variables: data.variables as object,
         createdById: user.id,
-        fields: data.fields
-          ? { create: data.fields.map((f) => this.toFieldCreate(f)) }
-          : undefined,
+        fields: data.fields ? { create: data.fields.map((f) => this.toFieldCreate(f)) } : undefined,
       },
       include: { fields: true },
     });
   }
 
-  async list(user: AuthenticatedUser, query: { status?: 'DRAFT' | 'ACTIVE' | 'ARCHIVED'; workspaceId?: string; limit?: number; offset?: number }) {
+  async list(
+    user: AuthenticatedUser,
+    query: {
+      status?: 'DRAFT' | 'ACTIVE' | 'ARCHIVED';
+      workspaceId?: string;
+      limit?: number;
+      offset?: number;
+    },
+  ) {
     const orgId = user.org?.id!;
     const where: Prisma.TemplateWhereInput = {
       organizationId: orgId,
@@ -82,15 +102,34 @@ export class TemplatesService {
   async update(
     user: AuthenticatedUser,
     id: string,
-    data: { name?: string; description?: string; status?: 'DRAFT' | 'ACTIVE' | 'ARCHIVED'; variables?: Record<string, string>; fields?: TemplateFieldInput[] },
+    data: {
+      name?: string;
+      description?: string;
+      status?: 'DRAFT' | 'ACTIVE' | 'ARCHIVED';
+      workspaceId?: string;
+      variables?: Record<string, string>;
+      fields?: TemplateFieldInput[];
+    },
   ) {
     const orgId = user.org?.id!;
     await this.get(user, id); // ownership check
+    if (data.fields && data.fields.length > MAX_FIELDS_PER_TEMPLATE) {
+      throw new BadRequestException(
+        `A template may define at most ${MAX_FIELDS_PER_TEMPLATE} fields`,
+      );
+    }
+    if (data.workspaceId) await this.assertWorkspaceInTenant(orgId, data.workspaceId);
 
     return this.prisma.$transaction(async (tx) => {
       const template = await tx.template.update({
         where: { id },
-        data: { name: data.name, description: data.description, status: data.status, variables: data.variables as object | undefined },
+        data: {
+          name: data.name,
+          description: data.description,
+          status: data.status,
+          workspaceId: data.workspaceId,
+          variables: data.variables as object | undefined,
+        },
       });
       if (data.fields) {
         await tx.templateField.deleteMany({ where: { templateId: id } });
@@ -108,6 +147,16 @@ export class TemplatesService {
     if (!template) throw new NotFoundException('Template not found');
     await this.prisma.template.delete({ where: { id } });
     return { success: true };
+  }
+
+  private async assertWorkspaceInTenant(
+    organizationId: string,
+    workspaceId: string,
+  ): Promise<void> {
+    const workspace = await this.prisma.workspace.findFirst({
+      where: { id: workspaceId, organizationId },
+    });
+    if (!workspace) throw new NotFoundException('Workspace not found in the active organization');
   }
 
   private toFieldCreate(f: TemplateFieldInput): Prisma.TemplateFieldCreateWithoutTemplateInput {

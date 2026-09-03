@@ -1,7 +1,16 @@
-import { Body, Controller, Get, Post, Query, Redirect, Req, Res, UnauthorizedException } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Post,
+  Query,
+  Redirect,
+  Req,
+  Res,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Request, Response } from 'express';
-import { randomUUID } from 'node:crypto';
 import { AuthService } from './auth.service';
 import { CurrentUser, Public } from '../../common/decorators';
 import { AuthenticatedUser } from '../../common/types';
@@ -16,8 +25,14 @@ export class AuthController {
   @Get('login')
   @Redirect()
   @ApiOperation({ summary: 'Redirect to the identity provider (Authentik) login' })
-  login(@Query('next') next?: string) {
-    const state = Buffer.from(JSON.stringify({ next: next ?? '/', nonce: randomUUID() })).toString('base64url');
+  login(@Query('next') next: string | undefined, @Res({ passthrough: true }) res: Response) {
+    const state = this.auth.createLoginState(next);
+    // Bind the signed state to the browser that initiated the flow.
+    res.cookie('signara_oidc_state', state, {
+      ...this.cookieOptions(10 * 60),
+      sameSite: 'lax',
+      path: '/api/v1/auth',
+    });
     return { url: this.auth.buildLoginUrl(state), statusCode: 302 };
   }
 
@@ -35,15 +50,23 @@ export class AuthController {
     if (error) throw new UnauthorizedException(`Identity provider error: ${error}`);
     if (!code || !state) throw new UnauthorizedException('Missing code or state');
 
-    let nextPath = '/';
-    try {
-      nextPath = JSON.parse(Buffer.from(state, 'base64url').toString()).next ?? '/';
-    } catch {
-      /* ignore malformed state */
+    const stateCookie = req.cookies?.signara_oidc_state;
+    if (!stateCookie || stateCookie.length > 4096 || stateCookie !== state) {
+      throw new UnauthorizedException('Invalid or expired login state');
     }
+    const nextPath = this.auth.parseLoginState(state);
+    res.clearCookie('signara_oidc_state', { path: '/api/v1/auth' });
 
     const tokens = await this.auth.exchangeCode(code);
     const userinfo = await this.auth.fetchUserinfo(tokens.access_token);
+    if (
+      typeof userinfo.sub !== 'string' ||
+      !userinfo.sub ||
+      typeof userinfo.email !== 'string' ||
+      !userinfo.email
+    ) {
+      throw new UnauthorizedException('Identity provider response missing required claims');
+    }
     const pair = await this.auth.loginWithIdp(
       {
         sub: String(userinfo.sub),
@@ -66,7 +89,11 @@ export class AuthController {
   async refresh(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
     const refreshToken = req.cookies?.signara_refresh;
     if (!refreshToken) throw new UnauthorizedException('Missing refresh token');
-    const pair = await this.auth.refresh(refreshToken, this.fingerprint(req), String(req.ip ?? 'unknown'));
+    const pair = await this.auth.refresh(
+      refreshToken,
+      this.fingerprint(req),
+      String(req.ip ?? 'unknown'),
+    );
     this.setAuthCookies(res, pair.accessToken, pair.refreshToken);
     return { accessToken: pair.accessToken, expiresIn: pair.expiresIn };
   }
@@ -80,7 +107,10 @@ export class AuthController {
       await this.auth.revokeSession(refreshToken, this.fingerprint(req));
     }
     res.clearCookie('signara_access', this.cookieOptions(15 * 60));
-    res.clearCookie('signara_refresh', { ...this.cookieOptions(30 * 24 * 60 * 60), path: '/api/v1/auth' });
+    res.clearCookie('signara_refresh', {
+      ...this.cookieOptions(30 * 24 * 60 * 60),
+      path: '/api/v1/auth',
+    });
     return { success: true };
   }
 

@@ -39,8 +39,12 @@ async function bootstrap() {
   );
 
   app.use(cookieParser());
+  const allowedOrigins = (config.get<string>('app.webUrl') ?? '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
   app.enableCors({
-    origin: config.get<string>('WEB_URL')?.split(',') ?? true,
+    origin: allowedOrigins.length ? allowedOrigins : false,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Idempotency-Key', 'X-Request-Id'],

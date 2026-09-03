@@ -31,14 +31,14 @@ Swagger: http://localhost:8000/api/v1/docs
 
 ## 3. Workspace layout
 
-| Package | What's inside |
-| --- | --- |
-| `apps/api` | NestJS REST API — modules under `src/modules/*` |
-| `apps/web` | Next.js app router — pages under `src/app/*` |
-| `packages/database` | Prisma schema, `prisma/migrations/*`, `prisma/seed.ts` |
-| `packages/shared` | (planned) shared DTOs/enums |
-| `openapi/` | OpenAPI spec — regenerate from Swagger as you add endpoints |
-| `infra/` | Compose overlays, K8s manifests, monitoring, nginx, backup |
+| Package             | What's inside                                               |
+| ------------------- | ----------------------------------------------------------- |
+| `apps/api`          | NestJS REST API — modules under `src/modules/*`             |
+| `apps/web`          | Next.js app router — pages under `src/app/*`                |
+| `packages/database` | Prisma schema, `prisma/migrations/*`, `prisma/seed.ts`      |
+| `packages/shared`   | Shared constants and contracts                              |
+| `openapi/`          | OpenAPI spec — regenerate from Swagger as you add endpoints |
+| `infra/`            | Compose support, monitoring, NGINX automation, backup       |
 
 ## 4. Conventions
 
@@ -60,13 +60,13 @@ Swagger: http://localhost:8000/api/v1/docs
 
 ## 5. Testing
 
-| Layer | Command | Notes |
-| --- | --- | --- |
-| Unit | `npm run test -w @signara/api` | Jest + ts-jest; see `signatures.service.spec.ts` |
-| Typecheck | `npm run typecheck` | strict TS across workspaces |
-| Lint | `npm run lint` | `tsc --noEmit` (API) + `next lint` (web) |
-| Compose syntax | `docker compose config --quiet` | CI validates both compose files |
-| E2E smoke | `make up && curl /ready` | CI boots the API against a disposable Postgres |
+| Layer          | Command                         | Notes                                            |
+| -------------- | ------------------------------- | ------------------------------------------------ |
+| Unit           | `npm run test -w @signara/api`  | Jest + ts-jest; see `signatures.service.spec.ts` |
+| Typecheck      | `npm run typecheck`             | strict TS across workspaces                      |
+| Lint           | `npm run lint`                  | `tsc --noEmit` (API) + `next lint` (web)         |
+| Compose syntax | `docker compose config --quiet` | CI validates both compose files                  |
+| E2E smoke      | `make up && curl /ready`        | CI boots the API against a disposable Postgres   |
 
 ## 6. Environment
 
@@ -110,13 +110,13 @@ docker compose -f docker-compose.dev.yml exec redis redis-cli -a signara
 
 ## 8. Troubleshooting
 
-| Symptom | Fix |
-| --- | --- |
-| `P1001: Can't reach database` | is Postgres running? `pg_isready`; check `.env` DATABASE_URL |
-| `PrismaClientInitializationError` | `npm run db:generate` |
+| Symptom                            | Fix                                                                                             |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `P1001: Can't reach database`      | is Postgres running? `pg_isready`; check `.env` DATABASE_URL                                    |
+| `PrismaClientInitializationError`  | `npm run db:generate`                                                                           |
 | Upload 400 "Unsupported file type" | the client set a generic `application/octet-stream`; set `Content-Type` from the file extension |
-| 403 "No active tenant" | user has no ACTIVE/TRIAL membership — seed the demo org or invite yourself |
-| 401 on /auth/me | missing/invalid IdP token — run the OIDC flow or refresh |
+| 403 "No active tenant"             | user has no ACTIVE/TRIAL membership — seed the demo org or invite yourself                      |
+| 401 on /auth/me                    | missing/invalid IdP token — run the OIDC flow or refresh                                        |
 
 See [AdministrationGuide.md](AdministrationGuide.md) for tenant/admin topics and
 [Security.md](Security.md) for hardening a dev instance (dev defaults are weak

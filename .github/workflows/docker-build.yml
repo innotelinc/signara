@@ -1,9 +1,13 @@
 name: Docker Build & Publish
 
+permissions:
+  contents: read
+  packages: write
+
 on:
   push:
     branches: [main]
-    tags: ["v*"]
+    tags: ['v*']
   pull_request:
     branches: [main]
 
@@ -34,7 +38,7 @@ jobs:
             type=ref,event=branch
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=sha
+            type=sha,format=long
 
       - name: Login to GHCR
         if: github.event_name != 'pull_request'
@@ -57,6 +61,7 @@ jobs:
           provenance: mode=max
 
       - name: Generate SBOM (syft)
+        if: github.event_name != 'pull_request'
         uses: anchore/sbom-action@v0.17.2
         with:
           image: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-${{ matrix.service }}:sha-${{ github.sha }}

@@ -7,8 +7,8 @@ name: signara-dev
 x-logging-default: &logging-default
   driver: json-file
   options:
-    max-size: "20m"
-    max-file: "5"
+    max-size: '20m'
+    max-file: '5'
 
 services:
   # ------------------------------------------------------------- frontend ---
@@ -16,6 +16,9 @@ services:
     build:
       context: .
       dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${API_URL:-http://localhost:8000}
+        NEXT_PUBLIC_WEB_URL: ${WEB_URL:-http://localhost:3000}
     container_name: signara-frontend
     restart: unless-stopped
     environment:
@@ -23,18 +26,39 @@ services:
       NEXT_PUBLIC_API_URL: ${API_URL:-http://localhost:8000}
       NEXT_PUBLIC_WEB_URL: ${WEB_URL:-http://localhost:3000}
     ports:
-      - "3000:3000"
+      - '3000:3000'
     depends_on:
       api:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3000/"]
+      test: ['CMD', 'wget', '-qO-', 'http://localhost:3000/']
       interval: 30s
       timeout: 5s
       retries: 5
     logging: *logging-default
 
   # ------------------------------------------------------------------ api ---
+  migrate:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-signara}:${POSTGRES_PASSWORD:-signara}@postgres:5432/${POSTGRES_DB:-signara}?schema=public
+    command:
+      [
+        'node_modules/.bin/prisma',
+        'migrate',
+        'deploy',
+        '--schema',
+        'packages/database/prisma/schema.prisma',
+      ]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: 'no'
+    logging: *logging-default
+
   api:
     build:
       context: .
@@ -48,9 +72,14 @@ services:
       REDIS_URL: redis://:${REDIS_PASSWORD:-signara}@redis:6379
       S3_ENDPOINT: http://minio:9000
       MEILISEARCH_HOST: http://meilisearch:7700
+      OIDC_JWKS_URL: http://authentik-server:9000/application/o/signara/jwks/
+      OIDC_TOKEN_URL: http://authentik-server:9000/application/o/token/
+      OIDC_USERINFO_URL: http://authentik-server:9000/application/o/userinfo/
     ports:
-      - "8000:8000"
+      - '8000:8000'
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:
@@ -60,7 +89,7 @@ services:
       meilisearch:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8000/ready"]
+      test: ['CMD', 'wget', '-qO-', 'http://localhost:8000/ready']
       interval: 15s
       timeout: 5s
       retries: 10
@@ -77,11 +106,11 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-signara}
       POSTGRES_DB: ${POSTGRES_DB:-signara}
     ports:
-      - "5432:5432"
+      - '5432:5432'
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-signara}"]
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-signara}']
       interval: 5s
       timeout: 5s
       retries: 10
@@ -96,13 +125,13 @@ services:
     image: redis:7-alpine
     container_name: signara-redis
     restart: unless-stopped
-    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:-signara}", "--appendonly", "yes"]
+    command: ['redis-server', '--requirepass', '${REDIS_PASSWORD:-signara}', '--appendonly', 'yes']
     ports:
-      - "6379:6379"
+      - '6379:6379'
     volumes:
       - redisdata:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-signara}", "ping"]
+      test: ['CMD', 'redis-cli', '-a', '${REDIS_PASSWORD:-signara}', 'ping']
       interval: 5s
       timeout: 3s
       retries: 10
@@ -121,13 +150,14 @@ services:
     environment:
       MINIO_ROOT_USER: ${S3_ACCESS_KEY:-signara}
       MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-signara-secret}
+      MINIO_PROMETHEUS_AUTH_TYPE: public
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - '9000:9000'
+      - '9001:9001'
     volumes:
       - miniodata:/data
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
+      test: ['CMD', 'mc', 'ready', 'local']
       interval: 10s
       timeout: 5s
       retries: 10
@@ -142,13 +172,13 @@ services:
     environment:
       MEILI_MASTER_KEY: ${MEILISEARCH_API_KEY:-signara-meili}
       MEILI_ENV: development
-      MEILI_NO_ANALYTICS: "true"
+      MEILI_NO_ANALYTICS: 'true'
     ports:
-      - "7700:7700"
+      - '7700:7700'
     volumes:
       - meilidata:/meili_data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:7700/health"]
+      test: ['CMD', 'curl', '-f', 'http://localhost:7700/health']
       interval: 10s
       timeout: 5s
       retries: 10
@@ -163,7 +193,7 @@ services:
     command: server
     environment:
       AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY:-change-me-authentik}
-      AUTHENTIK_ERROR_REPORTING__ENABLED: "false"
+      AUTHENTIK_ERROR_REPORTING__ENABLED: 'false'
       AUTHENTIK_POSTGRESQL__HOST: authentik-db
       AUTHENTIK_POSTGRESQL__USER: authentik
       AUTHENTIK_POSTGRESQL__PASSWORD: ${AUTHENTIK_DB_PASSWORD:-authentik}
@@ -175,8 +205,8 @@ services:
       # Authentik web — bound off the default 9000 to avoid clashing with MinIO's
       # API port in the local dev stack. Behind the proxy it lives at
       # auth.signara.innotel.us (see infra/nginx).
-      - "9100:9000"
-      - "9443:9443"
+      - '9100:9000'
+      - '9443:9443'
     volumes:
       - ./cert:/certs:ro
     depends_on:
@@ -185,7 +215,7 @@ services:
       authentik-redis:
         condition: service_started
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:9000/health/live/"]
+      test: ['CMD', 'wget', '-qO-', 'http://localhost:9000/health/live/']
       interval: 30s
       timeout: 5s
       retries: 5
@@ -199,7 +229,7 @@ services:
     command: worker
     environment:
       AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY:-change-me-authentik}
-      AUTHENTIK_ERROR_REPORTING__ENABLED: "false"
+      AUTHENTIK_ERROR_REPORTING__ENABLED: 'false'
       AUTHENTIK_POSTGRESQL__HOST: authentik-db
       AUTHENTIK_POSTGRESQL__USER: authentik
       AUTHENTIK_POSTGRESQL__PASSWORD: ${AUTHENTIK_DB_PASSWORD:-authentik}
@@ -227,7 +257,7 @@ services:
     volumes:
       - authentikdb:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U authentik"]
+      test: ['CMD-SHELL', 'pg_isready -U authentik']
       interval: 5s
       timeout: 5s
       retries: 10
@@ -237,11 +267,11 @@ services:
     image: redis:7-alpine
     container_name: signara-authentik-redis
     restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes"]
+    command: ['redis-server', '--appendonly', 'yes']
     volumes:
       - authentikredis:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ['CMD', 'redis-cli', 'ping']
       interval: 5s
       timeout: 3s
       retries: 10
@@ -261,11 +291,11 @@ services:
       - ./infra/monitoring/prometheus/rules.yml:/etc/prometheus/rules.yml:ro
       - promdata:/prometheus
     ports:
-      - "9090:9090"
+      - '9090:9090'
     depends_on:
       - api
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:9090/-/healthy"]
+      test: ['CMD', 'wget', '-qO-', 'http://localhost:9090/-/healthy']
       interval: 30s
       timeout: 5s
       retries: 5
@@ -279,20 +309,20 @@ services:
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-change-me}
-      GF_USERS_ALLOW_SIGN_UP: "false"
-      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+      GF_AUTH_ANONYMOUS_ENABLED: 'false'
       GF_SERVER_ROOT_URL: https://monitoring.signara.innotel.us
     volumes:
       - ./infra/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./infra/monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafanadata:/var/lib/grafana
     ports:
-      - "3001:3000"
+      - '3001:3000'
     depends_on:
       - prometheus
       - loki
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      test: ['CMD', 'wget', '-qO-', 'http://localhost:3000/api/health']
       interval: 30s
       timeout: 5s
       retries: 5
@@ -305,15 +335,68 @@ services:
     restart: unless-stopped
     command: -config.file=/etc/loki/loki.yaml
     ports:
-      - "3100:3100"
+      - '3100:3100'
     volumes:
       - ./infra/monitoring/loki/loki.yaml:/etc/loki/loki.yaml:ro
       - lokidata:/loki
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3100/ready"]
+      test: ['CMD', 'wget', '-qO-', 'http://localhost:3100/ready']
       interval: 30s
       timeout: 5s
       retries: 5
+    logging: *logging-default
+
+  # --------------------------------------------------------------- backup ---
+  backup:
+    build:
+      context: .
+      dockerfile: infra/backup/Dockerfile
+    restart: unless-stopped
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: ${POSTGRES_USER:-signara}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-signara}
+      POSTGRES_DB: ${POSTGRES_DB:-signara}
+      AUTHENTIK_POSTGRES_HOST: authentik-db
+      AUTHENTIK_POSTGRES_USER: authentik
+      AUTHENTIK_POSTGRES_PASSWORD: ${AUTHENTIK_DB_PASSWORD:-authentik}
+      AUTHENTIK_POSTGRES_DB: authentik
+      SOURCE_S3_ENDPOINT: http://minio:9000
+      SOURCE_S3_BUCKET: ${S3_BUCKET:-signara-documents}
+      SOURCE_S3_ACCESS_KEY: ${S3_ACCESS_KEY:-signara}
+      SOURCE_S3_SECRET_KEY: ${S3_SECRET_KEY:-signara-secret}
+      BACKUP_S3_ENDPOINT: ${BACKUP_S3_ENDPOINT:-}
+      BACKUP_S3_BUCKET: ${BACKUP_S3_BUCKET:-signara-backups}
+      BACKUP_S3_ACCESS_KEY: ${BACKUP_S3_ACCESS_KEY:-}
+      BACKUP_S3_SECRET_KEY: ${BACKUP_S3_SECRET_KEY:-}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-30}
+      BACKUP_ONCE: ${BACKUP_ONCE:-false}
+      BACKUP_RUN_ON_START: ${BACKUP_RUN_ON_START:-false}
+      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
+      BACKUP_REQUIRE_REMOTE: ${BACKUP_REQUIRE_REMOTE:-false}
+    volumes:
+      - ./infra/backup:/backup:ro
+      - backupcache:/backup-cache
+    depends_on:
+      postgres:
+        condition: service_healthy
+      authentik-db:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    logging: *logging-default
+
+  backup-metrics:
+    image: python:3.12-alpine
+    restart: unless-stopped
+    command: ['python', '/metrics/backup_metrics.py']
+    volumes:
+      - backupcache:/backup-cache:ro
+      - ./infra/backup/backup_metrics.py:/metrics/backup_metrics.py:ro
+    expose:
+      - '9101'
+    depends_on:
+      - backup
     logging: *logging-default
 
   # ------------------------------------------------------- alertmanager ---
@@ -325,7 +408,7 @@ services:
       - --config.file=/etc/alertmanager/alertmanager.yml
       - --storage.path=/alertmanager
     ports:
-      - "9093:9093"
+      - '9093:9093'
     volumes:
       - ./infra/monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
       - alertdata:/alertmanager
@@ -341,4 +424,5 @@ volumes:
   promdata:
   grafanadata:
   lokidata:
+  backupcache:
   alertdata:

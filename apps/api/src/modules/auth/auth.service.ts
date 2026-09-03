@@ -41,11 +41,51 @@ export class AuthService {
     return `${this.config.get<string>('oidc.authorizationUrl')}?${params.toString()}`;
   }
 
+  /** Signs the OIDC state so callbacks cannot forge an arbitrary redirect. */
+  createLoginState(next?: string): string {
+    const safeNext = this.safeNextPath(next);
+    return jwt.sign(
+      { next: safeNext, type: 'oidc-state' },
+      this.requiredSecret('auth.jwtAccessSecret', 'JWT_ACCESS_SECRET'),
+      { expiresIn: '10m', algorithm: 'HS256' },
+    );
+  }
+
+  /** Verifies and extracts the redirect path from an OIDC callback state. */
+  parseLoginState(state: string): string {
+    try {
+      const payload = jwt.verify(
+        state,
+        this.requiredSecret('auth.jwtAccessSecret', 'JWT_ACCESS_SECRET'),
+        { algorithms: ['HS256'] },
+      ) as jwt.JwtPayload & { next?: string; type?: string };
+      if (payload.type !== 'oidc-state') throw new Error('invalid state type');
+      return this.safeNextPath(payload.next);
+    } catch {
+      throw new UnauthorizedException('Invalid or expired login state');
+    }
+  }
+
+  private safeNextPath(next?: string): string {
+    if (
+      !next ||
+      !next.startsWith('/') ||
+      next.startsWith('//') ||
+      next.includes('\\') ||
+      /[\\u0000-\\u001f]/.test(next)
+    ) {
+      return '/';
+    }
+    return next;
+  }
+
   /** Exchanges the authorization code at Authentik's token endpoint. */
   async exchangeCode(code: string): Promise<OidcTokenResponse> {
     const tokenUrl = this.config.get<string>('oidc.tokenUrl');
     if (!tokenUrl) {
-      throw new UnauthorizedException('Identity provider is not configured (OIDC_TOKEN_URL missing)');
+      throw new UnauthorizedException(
+        'Identity provider is not configured (OIDC_TOKEN_URL missing)',
+      );
     }
     const body = new URLSearchParams({
       grant_type: 'authorization_code',
@@ -88,7 +128,9 @@ export class AuthService {
     if (!email) throw new BadRequestException('Identity provider response missing email');
 
     const groups = claims.groups ?? [];
-    const platformRole = groups.includes(this.config.get<string>('oidc.idpAdminGroup') ?? 'signara-admins')
+    const platformRole = groups.includes(
+      this.config.get<string>('oidc.idpAdminGroup') ?? 'signara-admins',
+    )
       ? 'PLATFORM_ADMIN'
       : 'USER';
 
@@ -129,16 +171,39 @@ export class AuthService {
    * the old session and issues a rotated pair with a fresh session.
    */
   async refresh(refreshToken: string, fingerprint: string, ipAddress: string): Promise<TokenPair> {
+    let claims: jwt.JwtPayload & { type?: string; sub?: string };
+    try {
+      claims = jwt.verify(
+        refreshToken,
+        this.requiredSecret('auth.jwtRefreshSecret', 'JWT_REFRESH_SECRET'),
+        { algorithms: ['HS256'] },
+      ) as jwt.JwtPayload & { type?: string; sub?: string };
+    } catch {
+      throw new UnauthorizedException('Invalid or expired refresh token');
+    }
+    if (claims.type !== 'refresh' || !claims.sub) {
+      throw new UnauthorizedException('Invalid refresh token');
+    }
+
     const hash = this.fingerprintHash(fingerprint, refreshToken);
     const session = await this.prisma.session.findFirst({
-      where: { refreshTokenHash: hash, revokedAt: null, expiresAt: { gt: new Date() } },
+      where: {
+        refreshTokenHash: hash,
+        userId: claims.sub,
+        revokedAt: null,
+        expiresAt: { gt: new Date() },
+      },
       include: { user: true },
     });
     if (!session) throw new UnauthorizedException('Invalid or expired refresh token');
 
     if (session.user.status !== 'ACTIVE') throw new UnauthorizedException('Account is not active');
 
-    await this.prisma.session.update({ where: { id: session.id }, data: { revokedAt: new Date() } });
+    const revoked = await this.prisma.session.updateMany({
+      where: { id: session.id, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+    if (revoked.count !== 1) throw new UnauthorizedException('Invalid or expired refresh token');
 
     const pair = this.issueTokenPair(session.userId, session.user.email);
     await this.createSession(session.userId, pair.refreshToken, fingerprint, ipAddress);
@@ -147,14 +212,22 @@ export class AuthService {
 
   async revokeSession(refreshToken: string, fingerprint: string): Promise<void> {
     const hash = this.fingerprintHash(fingerprint, refreshToken);
-    await this.prisma.session.updateMany({ where: { refreshTokenHash: hash }, data: { revokedAt: new Date() } });
+    await this.prisma.session.updateMany({
+      where: { refreshTokenHash: hash },
+      data: { revokedAt: new Date() },
+    });
   }
 
   async logoutAll(userId: string): Promise<void> {
     await this.prisma.session.updateMany({ where: { userId }, data: { revokedAt: new Date() } });
   }
 
-  async createSession(userId: string, refreshToken: string, fingerprint: string, ipAddress: string): Promise<void> {
+  async createSession(
+    userId: string,
+    refreshToken: string,
+    fingerprint: string,
+    ipAddress: string,
+  ): Promise<void> {
     await this.prisma.session.create({
       data: {
         userId,
