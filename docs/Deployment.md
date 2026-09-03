@@ -47,7 +47,7 @@ starts the production dependencies, applies migrations inside the Compose
 network, and starts the stack. Add `--use-images` on a deployment host to pull
 published GHCR images instead of building API and web locally. Add
 `--with-cerulean` to reconcile DNS, NGINX Proxy Manager hosts, and TLS through
-Cerulean using the host LAN IP.
+Cerulean. DNS uses the persisted public WAN IP; NPM uses the host LAN IP.
 
 ### Operations
 
@@ -78,9 +78,10 @@ set `BACKUP_REQUIRE_REMOTE=true` when remote durability is mandatory, and tune
 
 Cerulean is the recommended automation path. It owns the DNS record updates,
 NGINX Proxy Manager reconciliation, wildcard certificate issuance/renewal, and
-certificate attachment. The NPM upstream must be the host LAN IPv4 address so
-NPM can reach the API, web, Authentik, and admin ports; Docker bridge addresses
-are rejected.
+certificate attachment. DNS A records for Signara hosts always use the public
+WAN IPv4 address. NPM upstreams use the host LAN IPv4 address so NPM can reach
+the API, web, Authentik, and admin ports; Docker bridge addresses are rejected.
+The two addresses are deliberately separate.
 
 Set these values in `.env`:
 
@@ -89,7 +90,9 @@ CERULEAN_DNS_API_URL=http://localhost:3003
 CERULEAN_ADMIN_PASSWORD=<cerulean-admin-password>
 CERULEAN_BASE_DOMAIN=signara.innotel.us
 CERULEAN_ZONE=innotel.us
-CERULEAN_LAN_IP=192.168.1.46   # replace with the host's LAN IPv4 address
+CERULEAN_LAN_IP=192.168.1.46   # NPM upstream only; replace with host LAN IPv4
+CERULEAN_WAN_IP=73.68.203.71   # last verified WAN value; DNS only
+CERULEAN_WAN_DISCOVERY_URL=https://api.ipify.org
 ```
 
 Preview the reconciliation:
@@ -108,23 +111,27 @@ make cerulean:provision
 
 The checked-in map at `infra/cerulean/hosts.conf` provisions:
 
-| Hostname | Upstream |
-| --- | --- |
-| `app.signara.innotel.us` | LAN IP `:3000` |
-| `api.signara.innotel.us` | LAN IP `:8000` |
-| `auth.signara.innotel.us` | LAN IP `:9100` |
-| `admin.signara.innotel.us` | LAN IP `:81` |
+| Hostname | DNS A record | NPM upstream |
+| --- | --- | --- |
+| `app.signara.innotel.us` | WAN IP | LAN IP `:3000` |
+| `api.signara.innotel.us` | WAN IP | LAN IP `:8000` |
+| `auth.signara.innotel.us` | WAN IP | LAN IP `:9100` |
+| `admin.signara.innotel.us` | WAN IP | LAN IP `:81` |
 
-Cerulean registers or reuses the `innotel.us` zone, upserts each A record,
-creates or updates the NPM hosts, and issues or reuses the
-`*.signara.innotel.us` wildcard certificate. Certificate renewal and NPM
-attachment remain managed by Cerulean.
+On every normal provisioning run, Cerulean redetects and validates the current
+public WAN IPv4, persists it as `CERULEAN_WAN_IP`, and uses it for DNS. Cerulean
+then registers or reuses the `innotel.us` zone, removes prior A/CNAME
+records at the four exact Signara hostnames, creates exactly one WAN A record
+per host, creates or updates the NPM hosts with LAN upstreams, and issues or
+reuses the `*.signara.innotel.us` wildcard certificate. Unrelated records in
+`innotel.us` are never removed. Certificate renewal and NPM attachment remain
+managed by Cerulean.
 
 ## 3. Legacy direct NGINX automation
 
 The direct script remains available for installations that do not run Cerulean.
 It drives NPM directly and uses Cloudflare + Let's Encrypt DNS-01 credentials;
-it does not use the Cerulean LAN-IP workflow.
+it does not enforce the Cerulean WAN-DNS/LAN-upstream workflow.
 
 ### DNS and TLS via NGINX Proxy Manager
 
@@ -150,7 +157,7 @@ python3 infra/nginx/npm-proxy-hosts.py --apply
 The automation enables HTTPS redirects, HSTS, security headers, WebSocket
 support, and certificate renewal through NGINX Proxy Manager.
 
-DNS records should point at the NGINX Proxy Manager host:
+For the legacy path only, DNS records should point at the NGINX Proxy Manager host:
 
 ```text
 *.signara.innotel.us    A  <proxy-host-ip>

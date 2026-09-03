@@ -167,6 +167,7 @@ if (( WITH_CERULEAN )) || [[ "${CERULEAN_AUTO_PROVISION:-false}" == "true" ]]; t
   command -v python3 >/dev/null 2>&1 || fail "python3 is required for Cerulean provisioning"
   [[ -n "${CERULEAN_ADMIN_PASSWORD:-}" ]] || fail "CERULEAN_ADMIN_PASSWORD is required for Cerulean provisioning"
   [[ -n "${CERULEAN_LAN_IP:-}" ]] || warn "CERULEAN_LAN_IP is unset; provisioning will detect a non-virtual host LAN address"
+  [[ -n "${CERULEAN_WAN_IP:-}" ]] || log "CERULEAN_WAN_IP is unset; provisioning will detect and persist the public WAN address"
   log "Provisioning Signara DNS, NGINX Proxy Manager hosts, and TLS through Cerulean..."
   python3 infra/cerulean/provision.py --dotenv .env
 fi

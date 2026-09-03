@@ -109,8 +109,11 @@ set `CERULEAN_DNS_API_URL`, `CERULEAN_ADMIN_PASSWORD`, `CERULEAN_BASE_DOMAIN`,
 ./setup.sh --production --with-cerulean
 ```
 
-Cerulean uses the host LAN IPv4 address for both DNS A records and NPM upstreams;
-Docker bridge addresses are rejected. See
+Cerulean permanently uses the public WAN IPv4 address for Signara DNS A records
+and the host LAN IPv4 address only for NPM upstreams; Docker addresses are rejected.
+The current WAN IP is checked on every normal provisioning run and persisted in
+`.env` for auditability. Prior A/CNAME records for the four Signara hosts are
+removed before the single WAN A record is created. See
 [docs/Deployment.md](docs/Deployment.md) for Compose deployment, Cerulean, ingress,
 TLS, backups, and operations.
 
