@@ -16,8 +16,8 @@ groups:
           severity: critical
           team: platform
         annotations:
-          summary: "API 5xx error rate above 5%"
-          description: "The Signara API is returning 5xx errors at {{ $value | humanizePercentage }} over the last 5 minutes."
+          summary: 'API 5xx error rate above 5%'
+          description: 'The Signara API is returning 5xx errors at {{ $value | humanizePercentage }} over the last 5 minutes.'
 
       - alert: ApiUnavailable
         expr: up{job="signara-api"} == 0
@@ -26,18 +26,19 @@ groups:
           severity: critical
           team: platform
         annotations:
-          summary: "API is down"
-          description: "Prometheus cannot scrape the Signara API ({{ $labels.instance }})."
+          summary: 'API is down'
+          description: 'Prometheus cannot scrape the Signara API ({{ $labels.instance }}).'
 
       - alert: ApiHighLatency
-        expr: histogram_quantile(0.95, sum(rate(signara_http_request_duration_seconds_bucket[10m])) by (le))
+        expr:
+          histogram_quantile(0.95, sum(rate(signara_http_request_duration_seconds_bucket[10m])) by (le))
           > 2
         for: 10m
         labels:
           severity: warning
           team: platform
         annotations:
-          summary: "API p95 latency above 2s"
+          summary: 'API p95 latency above 2s'
 
       - alert: RateLimitedClients
         expr: sum(rate(signara_http_requests_total{status="429"}[5m])) > 10
@@ -46,22 +47,19 @@ groups:
           severity: warning
           team: platform
         annotations:
-          summary: "High rate-limiting activity"
-          description: "More than 10 requests/second are being rejected with 429."
+          summary: 'High rate-limiting activity'
+          description: 'More than 10 requests/second are being rejected with 429.'
 
   - name: signara-queues
     rules:
       - alert: QueueFailuresHigh
-        expr: |
-          sum(rate(bullmq_jobs_failed_total[5m]))
-            / clamp_min(sum(rate(bullmq_jobs_completed_total[5m]) + rate(bullmq_jobs_failed_total[5m])), 1)
-          > 0.1
+        expr: sum(bullmq_queue_failed_count) > 10
         for: 10m
         labels:
           severity: warning
           team: platform
         annotations:
-          summary: "BullMQ job failure rate above 10%"
+          summary: 'BullMQ failed-job backlog is high'
 
       - alert: QueueStalled
         expr: bullmq_queue_waiting_count > 1000
@@ -70,41 +68,33 @@ groups:
           severity: warning
           team: platform
         annotations:
-          summary: "Queue backlog growing"
+          summary: 'Queue backlog growing'
           description: "The '{{ $labels.queue }}' queue has {{ $value }} waiting jobs. Check workers and Redis."
-
-      - alert: QueueWorkerDown
-        expr: up{job=~".*worker.*"} == 0
-        for: 5m
-        labels:
-          severity: critical
-          team: platform
-        annotations:
-          summary: "Queue worker is down"
 
   - name: signara-certificates
     rules:
       - alert: CertificateExpiringSoon
         expr: |
-          time() - cert_expiry_timestamp_seconds < 14 * 24 * 60 * 60
+          signara_certificate_expiry_timestamp_seconds - time() > 0
+            and signara_certificate_expiry_timestamp_seconds - time() < 14 * 24 * 60 * 60
         for: 1h
         labels:
           severity: warning
           team: platform
         annotations:
-          summary: "TLS certificate expires in under 14 days"
-          description: "Certificate for '{{ $labels.hostname }}' expires at {{ $labels.expiry }}. Trigger renewal or rotate now."
+          summary: 'TLS certificate expires in under 14 days'
+          description: "Signing certificate '{{ $labels.certificate }}' expires in under 14 days. Rotate or renew it now."
 
       - alert: CertificateExpired
         expr: |
-          time() - cert_expiry_timestamp_seconds < 0
+          signara_certificate_expiry_timestamp_seconds - time() < 0
         for: 5m
         labels:
           severity: critical
           team: platform
         annotations:
-          summary: "TLS certificate has expired"
-          description: "Certificate for '{{ $labels.hostname }}' expired — HTTPS traffic is failing."
+          summary: 'TLS certificate has expired'
+          description: "Signing certificate '{{ $labels.certificate }}' has expired. Rotate or revoke it now."
 
   - name: signara-storage
     rules:
@@ -115,7 +105,7 @@ groups:
           severity: critical
           team: platform
         annotations:
-          summary: "MinIO / object storage is unreachable"
+          summary: 'MinIO / object storage is unreachable'
 
       - alert: StorageAlmostFull
         expr: |
@@ -127,7 +117,7 @@ groups:
           severity: warning
           team: platform
         annotations:
-          summary: "Object storage above 85% capacity"
+          summary: 'Object storage above 85% capacity'
 
   - name: signara-backups
     rules:
@@ -138,8 +128,8 @@ groups:
           severity: critical
           team: platform
         annotations:
-          summary: "Latest backup job failed"
-          description: "The most recent backup run ended in failure. Check infra/backup logs."
+          summary: 'Latest backup job failed'
+          description: 'The most recent backup run ended in failure. Check infra/backup logs.'
 
       - alert: BackupStale
         expr: (time() - signara_backup_last_success_timestamp) > 36 * 60 * 60
@@ -148,25 +138,5 @@ groups:
           severity: critical
           team: platform
         annotations:
-          summary: "No successful backup in 36 hours"
-          description: "Last successful backup was {{ $value | humanizeDuration }} ago. See docs/DisasterRecovery.md."
-
-  - name: signara-database
-    rules:
-      - alert: PostgresDown
-        expr: pg_up == 0
-        for: 3m
-        labels:
-          severity: critical
-          team: platform
-        annotations:
-          summary: "PostgreSQL is down"
-
-      - alert: PostgresConnectionsHigh
-        expr: pg_stat_activity_count > 80
-        for: 10m
-        labels:
-          severity: warning
-          team: platform
-        annotations:
-          summary: "PostgreSQL connection count above 80"
+          summary: 'No successful backup in 36 hours'
+          description: 'Last successful backup was {{ $value | humanizeDuration }} ago. See docs/DisasterRecovery.md.'

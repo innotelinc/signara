@@ -10,6 +10,7 @@ import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { PermissionsGuard } from './common/guards/permissions.guard';
 import { TenantGuard } from './common/guards/tenant.guard';
 import { AuditInterceptor } from './common/interceptors/audit.interceptor';
+import { MetricsInterceptor } from './common/interceptors/metrics.interceptor';
 import { HealthModule } from './modules/health/health.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
@@ -63,6 +64,7 @@ import { JobsModule } from './modules/jobs/jobs.module';
     { provide: APP_GUARD, useClass: PermissionsGuard },
     { provide: APP_GUARD, useClass: ThrottlerGuard }, // global rate limiting — see Security.md
     { provide: APP_INTERCEPTOR, useClass: AuditInterceptor }, // audit trail on mutating requests
+    { provide: APP_INTERCEPTOR, useClass: MetricsInterceptor }, // Prometheus HTTP metrics
   ],
 })
 export class AppModule {}

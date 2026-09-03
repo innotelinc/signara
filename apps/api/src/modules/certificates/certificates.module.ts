@@ -5,6 +5,7 @@ import { AcmeProvider } from './providers/acme.provider';
 import { CeruleanProvider } from './providers/cerulean.provider';
 import { InternalPkiProvider } from './providers/internal-pki.provider';
 import { ProviderRegistry } from './providers/provider-registry';
+import { CertificateMetricsService } from './certificate-metrics.service';
 
 @Module({
   controllers: [CertificatesController],
@@ -14,6 +15,7 @@ import { ProviderRegistry } from './providers/provider-registry';
     CeruleanProvider,
     InternalPkiProvider,
     ProviderRegistry,
+    CertificateMetricsService,
   ],
   exports: [CertificatesService],
 })

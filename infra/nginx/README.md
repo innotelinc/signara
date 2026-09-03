@@ -1,15 +1,14 @@
 # NGINX Proxy Manager automation
 
-Provisions the five Signara proxy hosts on an NGINX Proxy Manager (NPM) instance
+Provisions the four Signara proxy hosts on an NGINX Proxy Manager (NPM) instance
 and requests the wildcard Let's Encrypt certificate for `*.signara.innotel.us`.
 
-| Subdomain | Target |
-| --- | --- |
-| `app.signara.innotel.us` | Web UI (port 3000) |
-| `api.signara.innotel.us` | API (port 8000) |
-| `auth.signara.innotel.us` | Authentik (port 9000) |
+| Subdomain                  | Target                             |
+| -------------------------- | ---------------------------------- |
+| `app.signara.innotel.us`   | Web UI (port 3000)                 |
+| `api.signara.innotel.us`   | API (port 8000)                    |
+| `auth.signara.innotel.us`  | Authentik (port 9000)              |
 | `admin.signara.innotel.us` | NPM admin UI or platform admin app |
-| `docs.signara.innotel.us` | Documentation site |
 
 Requirements:
 

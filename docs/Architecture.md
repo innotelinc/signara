@@ -8,13 +8,13 @@ a monorepo of TypeScript applications:
 ```
                         ┌──────────────────────────────────────────────┐
    browser / signer     │                  Reverse proxy               │
-   ───────────────────► │  NGINX Proxy Manager / ingress (TLS, WAF)    │
+   ───────────────────► │  NGINX Proxy Manager (TLS, WAF)             │
                         └──────┬───────────────┬───────────────┬───────┘
                                │               │               │
                      ┌─────────▼───┐   ┌───────▼────────┐  ┌───▼─────────┐
-                     │  apps/web   │   │   apps/api     │  │   authentik │
-                     │  Next.js    │◄──►│   NestJS +     │  │   IdP (OIDC)│
-                     │  (BFF-ish)  │   │   BullMQ        │  │             │
+                     │  apps/web   │   │   apps/api     │  │  Authentik  │
+                     │  Next.js    │◄──►│  NestJS +     │◄──►│  IdP (OIDC) │
+                     │  (BFF-ish)  │   │  BullMQ        │  │             │
                      └─────────────┘   └───┬─────┬───────┘  └─────────────┘
                                            │     │  jobs
                                    ┌───────▼─┐ ┌─▼────────┐
@@ -31,15 +31,15 @@ a monorepo of TypeScript applications:
 
 ### Components
 
-| Component | Technology | Responsibility |
-| --- | --- | --- |
-| `apps/web` | Next.js 14 (App Router) | UI, signing room, public pages |
-| `apps/api` | NestJS 10 | REST API (`/api/v1`), RBAC, tenant isolation, workflow engine |
-| `packages/database` | Prisma + PostgreSQL | Schema, migrations, seed |
-| Redis / BullMQ | ioredis / bullmq | Queues: notifications, signing reminders, audit exports |
-| MinIO | S3-compatible | Immutable object storage for documents & signature images |
-| Meilisearch | Meilisearch | Full-text search over documents (tenant-filtered) |
-| Authentik | goauthentik | Identity provider: OIDC/OAuth2, MFA, SAML, SCIM, groups |
+| Component           | Technology              | Responsibility                                            |
+| ------------------- | ----------------------- | --------------------------------------------------------- |
+| `apps/web`          | Next.js 14 (App Router) | UI, signing room, public pages                            |     | `apps/api` | NestJS 10 | REST API (`/api/v1`), RBAC, tenant isolation, workflow engine |
+| `packages/database` | Prisma + PostgreSQL     | Schema, migrations, seed                                  |
+| `packages/shared`   | TypeScript              | Shared constants and contracts                            |
+| Redis / BullMQ      | ioredis / bullmq        | Queues: notifications, signing reminders, audit exports   |
+| MinIO               | S3-compatible           | Immutable object storage for documents & signature images |
+| Meilisearch         | Meilisearch             | Full-text search over documents (tenant-filtered)         |
+| Authentik           | goauthentik             | Identity provider: OIDC/OAuth2, MFA, SAML, SCIM, groups   |
 
 ## 2. Multi-tenancy
 
@@ -69,7 +69,7 @@ See [AdministrationGuide.md — Tenant isolation](AdministrationGuide.md#tenant-
 ## 3. Authentication & authorization
 
 1. User hits `/api/v1/auth/login` → API redirects to Authentik (OIDC
-   authorization-code + PKCE-compatible flow).
+   authorization-code + signed, browser-bound state).
 2. Authentik redirects back with a code; the API exchanges it at the token
    endpoint, fetches userinfo, upserts the local `User`, and issues:
    - a short-lived **access JWT** (15 min, HS256, `sub` = local user id)
@@ -78,7 +78,7 @@ See [AdministrationGuide.md — Tenant isolation](AdministrationGuide.md#tenant-
 3. Every request: `JwtAuthGuard` verifies the token (JWKS for IdP tokens; local
    secret for Signara tokens) and resolves the active tenant + permission set.
 4. `PermissionsGuard` enforces fine-grained RBAC from the system `Role →
-   Permission` graph; platform admins (IdP group `signara-admins`) bypass checks.
+Permission` graph; platform admins (IdP group `signara-admins`) bypass checks.
 5. Machine clients authenticate with `X-API-Key` (hashed at rest, revocable).
 
 ```mermaid
@@ -143,11 +143,11 @@ sign(token, { type: CERTIFICATE, certificateId, certificateSerial, signatureValu
 Providers live under `apps/api/src/modules/certificates/providers/` behind a
 common interface with three implementations:
 
-| Provider | Kind | Flow |
-| --- | --- | --- |
-| **ACME** | `ACME` | RFC 8555 issuance via `acme-client` (Let's Encrypt, ZeroSSL, enterprise ACME CAs); DNS-01 preferred for email-bound certs |
-| **Cerulean** | `CERULEAN` | config-driven REST signature service (signatureValue supplied at signing time; the key never leaves the provider) |
-| **Internal PKI** | `INTERNAL_PKI` | import existing cert + (optional) private key from an enterprise CA; key encrypted at rest |
+| Provider         | Kind           | Flow                                                                                                                      |
+| ---------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| **ACME**         | `ACME`         | RFC 8555 issuance via `acme-client` (Let's Encrypt, ZeroSSL, enterprise ACME CAs); DNS-01 preferred for email-bound certs |
+| **Cerulean**     | `CERULEAN`     | config-driven REST signature service (signatureValue supplied at signing time; the key never leaves the provider)         |
+| **Internal PKI** | `INTERNAL_PKI` | import existing cert + (optional) private key from an enterprise CA; key encrypted at rest                                |
 
 Key material is envelope-encrypted with AES-256-GCM under `CRYPTO_MASTER_KEY`
 (`privateKeyEnc` on `SigningCertificate` — never stored in the clear; the
@@ -170,11 +170,11 @@ documented in `identity-assurance.ts` and surfaced in evidence reports.
 
 ## 6. Jobs & async processing
 
-| Queue | Jobs | Worker |
-| --- | --- | --- |
-| `notifications` | send-email, send-sms | `NotificationProcessor` (EmailService deliver → DELIVERED/FAILED) |
-| `signing` | send-signing-invite, send-signing-reminder | `SigningProcessor` (EmailService sends invite/reminder) |
-| `audit` | export-render | (extend as needed) |
+| Queue           | Jobs                                       | Worker                                                            |
+| --------------- | ------------------------------------------ | ----------------------------------------------------------------- |
+| `notifications` | send-email, send-sms                       | `NotificationProcessor` (EmailService deliver → DELIVERED/FAILED) |
+| `signing`       | send-signing-invite, send-signing-reminder | `SigningProcessor` (EmailService sends invite/reminder)           |
+| `audit`         | export-render                              | (extend as needed)                                                |
 
 Workers retry with exponential backoff (5 attempts). For scale-out, run the
 `JobsModule` as a separate process; the queue names are stable.
@@ -202,12 +202,12 @@ development dependency-free (see Deployment.md § SMTP).
 - Rate limiting: global + per-route (logins stricter).
 - Signer tokens: `sgn_` + 192-bit random; single-use credential; no auth cookies.
 
-## 9. Deployment topologies
+## 9. Deployment topology
 
-| Topology | When | How |
-| --- | --- | --- |
-| Single host (Docker Compose) | SMB / self-hosting | `docker-compose.prod.yml` |
-| Kubernetes | Enterprise / HA | `infra/kubernetes/base` + HPA |
-| Managed cloud | High-scale | K8s on EKS/GKE/AKS, managed Postgres/Redis/object storage |
+Signara is deployed with Docker Compose on a self-hosted host. NGINX Proxy
+Manager provides public TLS termination, hostname routing, and certificate
+renewal. For larger installations, place the Compose host services behind
+managed PostgreSQL, Redis, or S3-compatible storage without changing the API
+contracts.
 
-See [Deployment.md](Deployment.md) for each path.
+See [Deployment.md](Deployment.md) for the supported deployment procedure.

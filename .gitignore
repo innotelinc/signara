@@ -17,7 +17,6 @@ coverage/
 !.env.example
 *.pem
 *.key
-!infra/kubernetes/base/*.example.yaml
 
 # Logs
 logs/
