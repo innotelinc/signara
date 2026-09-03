@@ -33,6 +33,9 @@ jobs:
         env:
           DATABASE_URL: postgresql://signara:signara@localhost:5432/signara
 
+      - name: Commit message policy
+        run: bash scripts/check-commit-messages.sh
+
       - name: Lint
         run: npm run lint
 

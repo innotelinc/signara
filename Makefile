@@ -11,7 +11,7 @@ SHELL := /bin/bash
         up up:dev up:prod down logs ps \
         backup backup:now restore \
         nginx:hosts nginx:cert \
-        cerulean:provision \
+        cerulean:provision check:commits \
         release docs
 
 help: ## Show this help message
@@ -98,6 +98,9 @@ nginx:cert: ## Request the wildcard Let's Encrypt certificate via NPM (legacy pa
 
 cerulean:provision: ## Reconcile Signara DNS, NPM hosts, and TLS through Cerulean
 	python3 infra/cerulean/provision.py --dotenv .env
+
+check:commits: ## Reject generated attribution text in reachable commit messages
+	bash scripts/check-commit-messages.sh
 
 ## ---- Release -------------------------------------------------------------
 
