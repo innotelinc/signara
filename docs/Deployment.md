@@ -1,14 +1,15 @@
 # Signara - Deployment Guide
 
-This guide documents the supported Docker Compose deployment for a self-hosted
-Signara installation, plus optional NGINX Proxy Manager automation.
+This guide documents the supported operator-run Docker Compose deployment for a
+self-hosted Signara installation, plus optional NGINX Proxy Manager automation.
+GitHub Actions do not connect to or deploy the host.
 
 1. [Docker Compose](#1-docker-compose)
 2. [DNS, TLS, and NGINX via Cerulean](#2-dns-tls-and-nginx-via-cerulean)
 3. [Legacy direct NGINX automation](#3-legacy-direct-nginx-automation)
 4. [Identity provider (Authentik)](#4-identity-provider-authentik)
 5. [Certificate-backed signing](#5-certificate-backed-signing)
-6. [Post-deploy checklist](#6-post-deploy-checklist)
+6. [Post-setup checklist](#6-post-setup-checklist)
 
 ---
 
@@ -38,14 +39,17 @@ on `http://localhost:8000`, Authentik on `http://localhost:9100`, MinIO on
 ### Production
 
 ```bash
-git clone <repo-url> signara && cd signara
+git clone https://github.com/innotelinc/signara.git signara
+cd signara
+cp .env.example .env
+# Edit .env and set production secrets and public URLs.
 ./setup.sh --production
 ```
 
 `setup.sh --production` validates prerequisites, creates missing local secrets,
 starts the production dependencies, applies migrations inside the Compose
-network, and starts the stack. Add `--use-images` on a deployment host to pull
-published GHCR images instead of building API and web locally. Add
+network, and starts the stack. Add `--use-images` when you intentionally want to pull published GHCR images instead
+of building API and web locally. Add
 `--with-cerulean` to reconcile DNS, NGINX Proxy Manager hosts, and TLS through
 Cerulean. DNS uses the persisted public WAN IP; NPM uses the host LAN IP.
 
@@ -55,7 +59,7 @@ Cerulean. DNS uses the persisted public WAN IP; NPM uses the host LAN IP.
 | ------------- | --------------------------------------------------------------------------------- |
 | View status   | `docker compose -f docker-compose.prod.yml ps`                                    |
 | API logs      | `docker compose -f docker-compose.prod.yml logs -f api`                           |
-| Upgrade       | `git pull && ./setup.sh --production --use-images --image-tag=sha-TAG`            |
+| Upgrade       | `git pull && ./setup.sh --production`                                              |
 | Backup        | `docker compose -f docker-compose.prod.yml exec backup /backup/backup.sh`         |
 | Restore       | `docker compose -f docker-compose.prod.yml exec backup /backup/restore.sh <file>` |
 | Stop services | `docker compose -f docker-compose.prod.yml down`                                  |
@@ -196,7 +200,7 @@ SMTP configuration is optional in local development. Set `SMTP_HOST`,
 `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, and `SMTP_FROM` to enable
 invitation, reminder, and notification delivery.
 
-## 6. Post-deploy checklist
+## 6. Post-setup checklist
 
 - [ ] `https://api.signara.innotel.us/ready` returns a healthy response
 - [ ] OIDC login round-trip works with MFA
