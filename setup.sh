@@ -29,6 +29,13 @@ fail() { printf '\033[1;31m[signara][error]\033[0m %s\n' "$*" >&2; exit 1; }
 command -v docker >/dev/null 2>&1 || fail "docker is required"
 docker compose version >/dev/null 2>&1 || fail "Docker Compose v2 is required"
 
+# Enable the version-controlled commit-guard hooks (.githooks) if this is a
+# git checkout (blocks attribution to anyone but Darnel Hunter).
+if [ -d "$SCRIPT_DIR/.githooks" ] && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  git config core.hooksPath "$SCRIPT_DIR/.githooks"
+  log "commit guard hook enabled (core.hooksPath -> .githooks)"
+fi
+
 set_env() {
   local key="$1" value="$2"
   if grep -q "^${key}=" .env; then
