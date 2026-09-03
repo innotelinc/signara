@@ -10,8 +10,8 @@ extensibility, and enterprise-grade infrastructure**. Self-hosted by default.
 Multi-tenant by design. Runs on the battle-tested open-source stack of **Next.js, NestJS,
 PostgreSQL, Redis, MinIO, and Meilisearch**.
 
-[![CI](https://innotelinc.github.io/signara/actions/workflows/ci.yml/badge.svg)](https://innotelinc.github.io/signara/actions/workflows/ci.yml)
-[![Release](https://innotelinc.github.io/signara/actions/workflows/release.yml/badge.svg)](https://innotelinc.github.io/signara/actions/workflows/release.yml)
+[![CI](https://github.com/innotelinc/signara/actions/workflows/ci.yml/badge.svg)](https://github.com/innotelinc/signara/actions/workflows/ci.yml)
+[![Release](https://github.com/innotelinc/signara/actions/workflows/release.yml/badge.svg)](https://github.com/innotelinc/signara/actions/workflows/release.yml)
 [![Latest release](https://img.shields.io/github/v/release/innotelinc/signara?color=16a34a)](https://innotelinc.github.io/signara/releases)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-or-later-brightgreen.svg)](LICENSE)
 
