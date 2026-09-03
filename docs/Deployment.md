@@ -4,10 +4,11 @@ This guide documents the supported Docker Compose deployment for a self-hosted
 Signara installation, plus optional NGINX Proxy Manager automation.
 
 1. [Docker Compose](#1-docker-compose)
-2. [DNS and TLS via NGINX Proxy Manager](#2-dns-and-tls-via-nginx-proxy-manager)
-3. [Identity provider (Authentik)](#3-identity-provider-authentik)
-4. [Certificate-backed signing](#4-certificate-backed-signing)
-5. [Post-deploy checklist](#5-post-deploy-checklist)
+2. [DNS, TLS, and NGINX via Cerulean](#2-dns-tls-and-nginx-via-cerulean)
+3. [Legacy direct NGINX automation](#3-legacy-direct-nginx-automation)
+4. [Identity provider (Authentik)](#4-identity-provider-authentik)
+5. [Certificate-backed signing](#5-certificate-backed-signing)
+6. [Post-deploy checklist](#6-post-deploy-checklist)
 
 ---
 
@@ -45,7 +46,8 @@ git clone <repo-url> signara && cd signara
 starts the production dependencies, applies migrations inside the Compose
 network, and starts the stack. Add `--use-images` on a deployment host to pull
 published GHCR images instead of building API and web locally. Add
-`--with-nginx` to configure NGINX Proxy Manager.
+`--with-cerulean` to reconcile DNS, NGINX Proxy Manager hosts, and TLS through
+Cerulean using the host LAN IP.
 
 ### Operations
 
@@ -72,7 +74,59 @@ set `BACKUP_REQUIRE_REMOTE=true` when remote durability is mandatory, and tune
 `BACKUP_RETENTION_DAYS`. Run restore drills regularly; see
 [DisasterRecovery.md](DisasterRecovery.md).
 
-## 2. DNS and TLS via NGINX Proxy Manager
+## 2. DNS, TLS, and NGINX via Cerulean
+
+Cerulean is the recommended automation path. It owns the DNS record updates,
+NGINX Proxy Manager reconciliation, wildcard certificate issuance/renewal, and
+certificate attachment. The NPM upstream must be the host LAN IPv4 address so
+NPM can reach the API, web, Authentik, and admin ports; Docker bridge addresses
+are rejected.
+
+Set these values in `.env`:
+
+```bash
+CERULEAN_DNS_API_URL=http://localhost:3003
+CERULEAN_ADMIN_PASSWORD=<cerulean-admin-password>
+CERULEAN_BASE_DOMAIN=signara.innotel.us
+CERULEAN_ZONE=innotel.us
+CERULEAN_LAN_IP=192.168.1.46   # replace with the host's LAN IPv4 address
+```
+
+Preview the reconciliation:
+
+```bash
+python3 infra/cerulean/provision.py --dry-run --dotenv .env
+```
+
+Apply it during setup or independently:
+
+```bash
+./setup.sh --production --with-cerulean
+# or
+make cerulean:provision
+```
+
+The checked-in map at `infra/cerulean/hosts.conf` provisions:
+
+| Hostname | Upstream |
+| --- | --- |
+| `app.signara.innotel.us` | LAN IP `:3000` |
+| `api.signara.innotel.us` | LAN IP `:8000` |
+| `auth.signara.innotel.us` | LAN IP `:9100` |
+| `admin.signara.innotel.us` | LAN IP `:81` |
+
+Cerulean registers or reuses the `innotel.us` zone, upserts each A record,
+creates or updates the NPM hosts, and issues or reuses the
+`*.signara.innotel.us` wildcard certificate. Certificate renewal and NPM
+attachment remain managed by Cerulean.
+
+## 3. Legacy direct NGINX automation
+
+The direct script remains available for installations that do not run Cerulean.
+It drives NPM directly and uses Cloudflare + Let's Encrypt DNS-01 credentials;
+it does not use the Cerulean LAN-IP workflow.
+
+### DNS and TLS via NGINX Proxy Manager
 
 The automation at `infra/nginx/npm-proxy-hosts.py` creates or updates proxy
 hosts and can request the wildcard certificate. Run it directly or through
@@ -106,7 +160,7 @@ auth.signara.innotel.us A  <proxy-host-ip>
 admin.signara.innotel.us A  <proxy-host-ip>
 ```
 
-## 3. Identity provider (Authentik)
+## 4. Identity provider (Authentik)
 
 Authentik runs as part of both Compose stacks.
 
@@ -121,7 +175,7 @@ Authentik runs as part of both Compose stacks.
 Authentik also supports SAML and SCIM integrations for enterprise identity
 lifecycle management; configure those through the Authentik administration UI.
 
-## 4. Certificate-backed signing
+## 5. Certificate-backed signing
 
 The API supports ACME, Cerulean, and internal PKI providers. Private key
 material is encrypted at rest with `CRYPTO_MASTER_KEY`; do not rotate that key
@@ -135,7 +189,7 @@ SMTP configuration is optional in local development. Set `SMTP_HOST`,
 `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, and `SMTP_FROM` to enable
 invitation, reminder, and notification delivery.
 
-## 5. Post-deploy checklist
+## 6. Post-deploy checklist
 
 - [ ] `https://api.signara.innotel.us/ready` returns a healthy response
 - [ ] OIDC login round-trip works with MFA

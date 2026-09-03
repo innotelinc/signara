@@ -6,6 +6,7 @@ cd "$SCRIPT_DIR"
 
 MODE=development
 WITH_NGINX=0
+WITH_CERULEAN=0
 USE_IMAGES=0
 IMAGE_TAG_OVERRIDE=""
 for arg in "$@"; do
@@ -13,10 +14,11 @@ for arg in "$@"; do
     --production|prod) MODE=production ;;
     --development|dev) MODE=development ;;
     --with-nginx) WITH_NGINX=1 ;;
+    --with-cerulean) WITH_CERULEAN=1 ;;
     --use-images) USE_IMAGES=1 ;;
     --image-tag=*) IMAGE_TAG_OVERRIDE="${arg#*=}" ;;
-    --image-tag) echo "Usage: ./setup.sh [--development|--production] [--use-images] [--image-tag=TAG] [--with-nginx]" >&2; exit 2 ;;
-    *) echo "Usage: ./setup.sh [--development|--production] [--use-images] [--image-tag=TAG] [--with-nginx]" >&2; exit 2 ;;
+    --image-tag) echo "Usage: ./setup.sh [--development|--production] [--use-images] [--image-tag=TAG] [--with-nginx] [--with-cerulean]" >&2; exit 2 ;;
+    *) echo "Usage: ./setup.sh [--development|--production] [--use-images] [--image-tag=TAG] [--with-nginx] [--with-cerulean]" >&2; exit 2 ;;
   esac
 done
 
@@ -159,6 +161,14 @@ if (( WITH_NGINX )); then
   command -v python3 >/dev/null 2>&1 || fail "python3 is required for --with-nginx"
   log "Configuring NGINX Proxy Manager..."
   python3 infra/nginx/npm-proxy-hosts.py --apply
+fi
+
+if (( WITH_CERULEAN )) || [[ "${CERULEAN_AUTO_PROVISION:-false}" == "true" ]]; then
+  command -v python3 >/dev/null 2>&1 || fail "python3 is required for Cerulean provisioning"
+  [[ -n "${CERULEAN_ADMIN_PASSWORD:-}" ]] || fail "CERULEAN_ADMIN_PASSWORD is required for Cerulean provisioning"
+  [[ -n "${CERULEAN_LAN_IP:-}" ]] || warn "CERULEAN_LAN_IP is unset; provisioning will detect a non-virtual host LAN address"
+  log "Provisioning Signara DNS, NGINX Proxy Manager hosts, and TLS through Cerulean..."
+  python3 infra/cerulean/provision.py --dotenv .env
 fi
 
 log "Signara $MODE setup complete"
