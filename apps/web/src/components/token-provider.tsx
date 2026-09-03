@@ -13,5 +13,5 @@ export function TokenProvider({ token }: { token: string | null }) {
     setAccessToken(token);
   }, [token]);
 
-  return null;
+  return <meta name="access-token" content={token ?? ''} />;
 }

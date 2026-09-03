@@ -1,9 +1,4 @@
-import {
-  CanActivate,
-  ExecutionContext,
-  Injectable,
-  UnauthorizedException,
-} from '@nestjs/common';
+import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import { JwksClient } from 'jwks-rsa';
@@ -30,7 +25,7 @@ interface IdpTokenPayload {
  */
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
-  private jwks: JwksClient;
+  private readonly jwks?: JwksClient;
 
   constructor(
     private readonly reflector: Reflector,
@@ -38,15 +33,14 @@ export class JwtAuthGuard implements CanActivate {
     private readonly prisma: PrismaService,
   ) {
     const jwksUrl = this.config.get<string>('oidc.jwksUrl') ?? '';
-    if (!jwksUrl) {
-      throw new Error('OIDC_JWKS_URL is not configured');
+    if (jwksUrl) {
+      this.jwks = new JwksClient({
+        jwksUri: jwksUrl,
+        cache: true,
+        rateLimit: true,
+        jwksRequestsPerMinute: 10,
+      });
     }
-    this.jwks = new JwksClient({
-      jwksUri: jwksUrl,
-      cache: true,
-      rateLimit: true,
-      jwksRequestsPerMinute: 10,
-    });
   }
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -82,20 +76,36 @@ export class JwtAuthGuard implements CanActivate {
     return authorization.slice('Bearer '.length).trim();
   }
 
-  /** Verifies the IdP JWT and maps it onto a local Signara user. */
+  /** Verifies a local Signara or Authentik JWT and maps it to a local user. */
   private async resolvePrincipal(token: string): Promise<AuthenticatedUser> {
     const issuer = this.config.get<string>('oidc.issuerUrl');
-    let payload: IdpTokenPayload;
+    const audience = this.config.get<string>('oidc.clientId');
+    let payload: IdpTokenPayload & { type?: string };
     try {
       const decoded = jwt.decode(token, { complete: true }) as jwt.Jwt | null;
       if (!decoded) throw new Error('unable to decode token');
-      const kid = decoded.header.kid;
-      const key = await this.jwks.getSigningKey(kid);
-      payload = jwt.verify(token, key.getPublicKey(), {
-        algorithms: ['RS256'],
-        issuer: issuer || undefined,
-      }) as IdpTokenPayload;
-    } catch (err) {
+
+      if (decoded.header.alg === 'HS256') {
+        const secret = this.config.get<string>('auth.jwtAccessSecret');
+        if (!secret) throw new Error('local access JWT secret is not configured');
+        payload = jwt.verify(token, secret, { algorithms: ['HS256'] }) as IdpTokenPayload & {
+          type?: string;
+        };
+        if (payload.type !== 'access') throw new Error('not an access token');
+      } else if (decoded.header.alg === 'RS256') {
+        if (!this.jwks) throw new Error('OIDC JWKS is not configured');
+        const kid = decoded.header.kid;
+        if (!kid) throw new Error('token has no key id');
+        const key = await this.jwks.getSigningKey(kid);
+        payload = jwt.verify(token, key.getPublicKey(), {
+          algorithms: ['RS256'],
+          issuer: issuer || undefined,
+          audience: audience || undefined,
+        }) as IdpTokenPayload & { type?: string };
+      } else {
+        throw new Error('unsupported token algorithm');
+      }
+    } catch {
       throw new UnauthorizedException('Invalid or expired token');
     }
 
@@ -111,7 +121,9 @@ export class JwtAuthGuard implements CanActivate {
       },
     });
     if (!user) {
-      throw new UnauthorizedException('User is not provisioned. Ask your administrator to invite you.');
+      throw new UnauthorizedException(
+        'User is not provisioned. Ask your administrator to invite you.',
+      );
     }
 
     const principal: AuthenticatedUser = {
@@ -154,7 +166,12 @@ export class JwtAuthGuard implements CanActivate {
     const crypto = await import('node:crypto');
     const keyHash = crypto.createHash('sha256').update(rawKey).digest('hex');
     const apiKeyRow = await this.prisma.apiKey.findFirst({
-      where: { keyHash, revokedAt: null, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
+      where: {
+        keyHash,
+        revokedAt: null,
+        organization: { status: { in: ['ACTIVE', 'TRIAL'] }, deletedAt: null },
+        OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+      },
     });
     if (!apiKeyRow) {
       throw new UnauthorizedException('Invalid API key');
@@ -163,9 +180,24 @@ export class JwtAuthGuard implements CanActivate {
       .update({ where: { id: apiKeyRow.id }, data: { lastUsedAt: new Date() } })
       .catch(() => undefined);
 
-    const user = await this.prisma.user.findFirst({
-      where: { id: apiKeyRow.userId ?? '', status: 'ACTIVE' },
-    });
+    const user = apiKeyRow.userId
+      ? await this.prisma.user.findFirst({
+          where: {
+            id: apiKeyRow.userId,
+            status: 'ACTIVE',
+            deletedAt: null,
+            memberships: {
+              some: {
+                organizationId: apiKeyRow.organizationId,
+                organization: { status: { in: ['ACTIVE', 'TRIAL'] }, deletedAt: null },
+              },
+            },
+          },
+        })
+      : null;
+    if (apiKeyRow.userId && !user) {
+      throw new UnauthorizedException('API key owner is not an active organization member');
+    }
 
     return {
       id: apiKeyRow.userId ?? 'system',

@@ -1,4 +1,9 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHash, randomUUID } from 'node:crypto';
 import { DocumentStatus, Prisma } from '@prisma/client';
@@ -24,13 +29,24 @@ export class DocumentsService {
     private readonly config: ConfigService,
   ) {}
 
-  async upload(user: AuthenticatedUser, file: Express.Multer.File, data: { title?: string; workspaceId?: string; tags?: string[]; description?: string }) {
+  async upload(
+    user: AuthenticatedUser,
+    file: Express.Multer.File,
+    data: { title?: string; workspaceId?: string; tags?: string[]; description?: string },
+  ) {
     const orgId = user.org?.id;
     if (!orgId) throw new ForbiddenException('No active tenant');
+    if (!file) throw new BadRequestException('A document file is required');
+    if (data.workspaceId) await this.assertWorkspaceInTenant(orgId, data.workspaceId);
 
     const extension = ALLOWED_TYPES.get(file.mimetype);
     if (!extension) {
-      throw new BadRequestException(`Unsupported file type: ${file.mimetype}. Allowed: PDF, DOCX, PNG, JPEG, WebP`);
+      throw new BadRequestException(
+        `Unsupported file type: ${file.mimetype}. Allowed: PDF, DOCX, PNG, JPEG, WebP`,
+      );
+    }
+    if (!this.hasExpectedMagic(file, extension)) {
+      throw new BadRequestException('The file content does not match its declared type');
     }
     if (file.size > 50 * 1024 * 1024) {
       throw new BadRequestException('File exceeds the 50 MB upload limit');
@@ -85,7 +101,13 @@ export class DocumentsService {
 
   async list(
     user: AuthenticatedUser,
-    query: { status?: DocumentStatus; workspaceId?: string; search?: string; limit?: number; offset?: number },
+    query: {
+      status?: DocumentStatus;
+      workspaceId?: string;
+      search?: string;
+      limit?: number;
+      offset?: number;
+    },
   ) {
     const orgId = user.org?.id!;
 
@@ -128,7 +150,9 @@ export class DocumentsService {
       where: { id, organizationId: orgId, deletedAt: null },
       include: {
         versions: { orderBy: { version: 'desc' } },
-        signingRequests: { select: { id: true, status: true, mode: true, title: true, createdAt: true } },
+        signingRequests: {
+          select: { id: true, status: true, mode: true, title: true, createdAt: true },
+        },
       },
     });
     if (!document) throw new NotFoundException('Document not found');
@@ -153,14 +177,24 @@ export class DocumentsService {
     return { url, fileName: document.fileName, contentType: document.contentType };
   }
 
-  async updateMetadata(user: AuthenticatedUser, id: string, data: { title?: string; description?: string; tags?: string[]; workspaceId?: string }) {
+  async updateMetadata(
+    user: AuthenticatedUser,
+    id: string,
+    data: { title?: string; description?: string; tags?: string[]; workspaceId?: string },
+  ) {
     const orgId = user.org?.id!;
     const document = await this.prisma.document.findFirst({ where: { id, organizationId: orgId } });
     if (!document) throw new NotFoundException('Document not found');
+    if (data.workspaceId) await this.assertWorkspaceInTenant(orgId, data.workspaceId);
 
     const updated = await this.prisma.document.update({
       where: { id },
-      data: { title: data.title, description: data.description, tags: data.tags, workspaceId: data.workspaceId },
+      data: {
+        title: data.title,
+        description: data.description,
+        tags: data.tags,
+        workspaceId: data.workspaceId,
+      },
     });
     void this.meili.indexDoc({
       id: updated.id,
@@ -175,13 +209,24 @@ export class DocumentsService {
   }
 
   /** Appends a new immutable version of the document. */
-  async addVersion(user: AuthenticatedUser, id: string, file: Express.Multer.File, changeNote?: string) {
+  async addVersion(
+    user: AuthenticatedUser,
+    id: string,
+    file: Express.Multer.File,
+    changeNote?: string,
+  ) {
     const orgId = user.org?.id!;
     const document = await this.prisma.document.findFirst({ where: { id, organizationId: orgId } });
     if (!document) throw new NotFoundException('Document not found');
+    if (!file) throw new BadRequestException('A document file is required');
 
     const extension = ALLOWED_TYPES.get(file.mimetype);
     if (!extension) throw new BadRequestException('Unsupported file type');
+    if (!this.hasExpectedMagic(file, extension)) {
+      throw new BadRequestException('The file content does not match its declared type');
+    }
+    if (file.size > 50 * 1024 * 1024)
+      throw new BadRequestException('File exceeds the 50 MB upload limit');
     const sha256 = createHash('sha256').update(file.buffer).digest('hex');
     const key = `${orgId}/documents/${document.id}/v${document.version + 1}.${extension}`;
     await this.minio.put(key, file.buffer, file.mimetype, sha256);
@@ -200,7 +245,13 @@ export class DocumentsService {
       });
       const updated = await tx.document.update({
         where: { id },
-        data: { version: { increment: 1 }, fileKey: key, fileName: file.originalname, sizeBytes: BigInt(file.size), checksumSha256: sha256 },
+        data: {
+          version: { increment: 1 },
+          fileKey: key,
+          fileName: file.originalname,
+          sizeBytes: BigInt(file.size),
+          checksumSha256: sha256,
+        },
       });
       void this.meili.indexDoc({
         id: updated.id,
@@ -213,6 +264,31 @@ export class DocumentsService {
       });
       return { version: next, document: updated };
     });
+  }
+
+  private hasExpectedMagic(file: Express.Multer.File, extension: string): boolean {
+    const bytes = file.buffer;
+    if (extension === 'pdf') return bytes.subarray(0, 5).toString('ascii') === '%PDF-';
+    if (extension === 'docx') return bytes.subarray(0, 2).toString('ascii') === 'PK';
+    if (extension === 'png')
+      return bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+    if (extension === 'jpg') return bytes.subarray(0, 3).equals(Buffer.from([255, 216, 255]));
+    if (extension === 'webp')
+      return (
+        bytes.subarray(0, 4).toString('ascii') === 'RIFF' &&
+        bytes.subarray(8, 12).toString('ascii') === 'WEBP'
+      );
+    return false;
+  }
+
+  private async assertWorkspaceInTenant(
+    organizationId: string,
+    workspaceId: string,
+  ): Promise<void> {
+    const workspace = await this.prisma.workspace.findFirst({
+      where: { id: workspaceId, organizationId },
+    });
+    if (!workspace) throw new NotFoundException('Workspace not found in the active organization');
   }
 
   /** Soft-deletes a document and removes it from the search index. */

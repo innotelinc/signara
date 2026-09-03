@@ -12,40 +12,31 @@ rule_files:
 alerting:
   alertmanagers:
     - static_configs:
-        - targets: ["alertmanager:9093"]
+        - targets: ['alertmanager:9093']
 
 scrape_configs:
-  - job_name: "signara-api"
+  - job_name: 'signara-api'
     metrics_path: /metrics
     static_configs:
-      - targets: ["api:8000"]
+      - targets: ['api:8000']
         labels:
           service: signara-api
 
-  - job_name: "prometheus"
+  - job_name: 'prometheus'
     static_configs:
-      - targets: ["localhost:9090"]
+      - targets: ['localhost:9090']
 
-  # Postgres exporter (run the exporter container in the compose stack)
-  - job_name: "signara-postgres"
+  - job_name: 'signara-backup'
+    metrics_path: /metrics
     static_configs:
-      - targets: ["postgres-exporter:9187"]
+      - targets: ['backup-metrics:9101']
         labels:
-          service: postgres
+          service: signara-backup
 
   # MinIO exposes Prometheus metrics on the API endpoint
-  - job_name: "signara-minio"
+  - job_name: 'signara-minio'
     metrics_path: /minio/v2/metrics/cluster
-    bearer_token: ""
     static_configs:
-      - targets: ["minio:9000"]
+      - targets: ['minio:9000']
         labels:
           service: minio
-    tls_config:
-      insecure_skip_verify: false
-
-  - job_name: "signara-redis"
-    static_configs:
-      - targets: ["redis-exporter:9121"]
-        labels:
-          service: redis

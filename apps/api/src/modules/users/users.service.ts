@@ -13,7 +13,10 @@ import { AuthenticatedUser } from '../../common/types';
 export class UsersService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async updateProfile(user: AuthenticatedUser, data: { displayName?: string; timezone?: string; locale?: string }) {
+  async updateProfile(
+    user: AuthenticatedUser,
+    data: { displayName?: string; timezone?: string; locale?: string },
+  ) {
     return this.prisma.user.update({
       where: { id: user.id },
       data: {
@@ -35,7 +38,10 @@ export class UsersService {
   }
 
   /** All members of the caller's active organization. */
-  async listMembers(user: AuthenticatedUser, query: { search?: string; role?: MembershipRole; limit?: number; offset?: number }) {
+  async listMembers(
+    user: AuthenticatedUser,
+    query: { search?: string; role?: MembershipRole; limit?: number; offset?: number },
+  ) {
     const orgId = user.org?.id;
     if (!orgId) throw new ForbiddenException('No active tenant');
 
@@ -44,7 +50,14 @@ export class UsersService {
       organizationId: orgId,
       ...(query.role ? { role: query.role } : {}),
       ...(query.search
-        ? { user: { OR: [{ email: { contains: query.search, mode: 'insensitive' as const } }, { displayName: { contains: query.search, mode: 'insensitive' as const } }] } }
+        ? {
+            user: {
+              OR: [
+                { email: { contains: query.search, mode: 'insensitive' as const } },
+                { displayName: { contains: query.search, mode: 'insensitive' as const } },
+              ],
+            },
+          }
         : {}),
     };
 
@@ -52,7 +65,17 @@ export class UsersService {
       this.prisma.membership.count({ where }),
       this.prisma.membership.findMany({
         where,
-        include: { user: { select: { id: true, email: true, displayName: true, avatarUrl: true, lastLoginAt: true } } },
+        include: {
+          user: {
+            select: {
+              id: true,
+              email: true,
+              displayName: true,
+              avatarUrl: true,
+              lastLoginAt: true,
+            },
+          },
+        },
         orderBy: { createdAt: 'asc' },
         skip: query.offset ?? 0,
         take: limit,
@@ -63,7 +86,10 @@ export class UsersService {
   }
 
   /** Invites a user by email with a role; idempotent per (org, email). */
-  async inviteMember(user: AuthenticatedUser, data: { email: string; role: MembershipRole; workspaceIds?: string[] }) {
+  async inviteMember(
+    user: AuthenticatedUser,
+    data: { email: string; role: MembershipRole; workspaceIds?: string[] },
+  ) {
     const orgId = user.org?.id;
     if (!orgId) throw new ForbiddenException('No active tenant');
 
@@ -75,6 +101,16 @@ export class UsersService {
       include: { user: true },
     });
     if (existing) throw new ConflictException('User is already a member');
+
+    if (data.workspaceIds?.length) {
+      const workspaces = await this.prisma.workspace.findMany({
+        where: { organizationId: orgId, id: { in: data.workspaceIds } },
+        select: { id: true },
+      });
+      if (workspaces.length !== new Set(data.workspaceIds).size) {
+        throw new NotFoundException('One or more workspaces are not in the active organization');
+      }
+    }
 
     let memberUser = await this.prisma.user.findUnique({ where: { email } });
     if (!memberUser) {
@@ -117,8 +153,10 @@ export class UsersService {
     this.assertCanManage(user, orgId);
 
     const membership = await this.prisma.membership.findUnique({ where: { id: memberId } });
-    if (!membership || membership.organizationId !== orgId) throw new NotFoundException('Member not found');
-    if (membership.role === 'OWNER') throw new BadRequestException('Cannot remove the organization owner');
+    if (!membership || membership.organizationId !== orgId)
+      throw new NotFoundException('Member not found');
+    if (membership.role === 'OWNER')
+      throw new BadRequestException('Cannot remove the organization owner');
 
     await this.prisma.membership.delete({ where: { id: memberId } });
     return { success: true };
@@ -128,7 +166,9 @@ export class UsersService {
   private assertCanManage(user: AuthenticatedUser, orgId: string): void {
     const role = user.org?.role;
     if (role !== 'OWNER' && role !== 'ADMIN') {
-      throw new ForbiddenException('Only organization owners and administrators can manage members');
+      throw new ForbiddenException(
+        'Only organization owners and administrators can manage members',
+      );
     }
   }
 }

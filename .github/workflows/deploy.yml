@@ -9,16 +9,14 @@ on:
         default: production
         type: choice
         options: [production, staging]
-      target:
-        description: Deployment strategy
-        required: true
-        default: docker
-        type: choice
-        options: [docker, kubernetes]
   workflow_run:
     workflows: [Docker Build & Publish]
     types: [completed]
     branches: [main]
+
+permissions:
+  contents: read
+  packages: read
 
 concurrency:
   group: deploy-${{ github.event.inputs.environment || 'production' }}
@@ -26,7 +24,7 @@ concurrency:
 
 jobs:
   deploy:
-    name: Deploy (${{ github.event.inputs.target || 'docker' }})
+    name: Deploy with Docker Compose
     runs-on: ubuntu-latest
     environment: ${{ github.event.inputs.environment || 'production' }}
     if: github.event.workflow_run == null || github.event.workflow_run.conclusion == 'success'
@@ -34,31 +32,26 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Deploy via Docker Compose (SSH)
-        if: github.event.inputs.target != 'kubernetes' || github.event.inputs.target == null
         uses: appleboy/ssh-action@v1.0.3
+        env:
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE_TAG: sha-${{ github.event.workflow_run.head_sha || github.sha }}
+          IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}/signara
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
+          envs: GHCR_USERNAME,GHCR_TOKEN,IMAGE_TAG,IMAGE_PREFIX
           script: |
-            set -e
+            set -Eeuo pipefail
             cd /opt/signara
-            git fetch origin main && git reset --hard origin/main
+            git fetch origin main
+            git reset --hard origin/main
             cp .env .env.bak || true
-            ./setup.sh
-            docker compose -f docker-compose.prod.yml pull
-            docker compose -f docker-compose.prod.yml up -d --remove-orphans
+            printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GHCR_USERNAME" --password-stdin
+            trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
+            export SIGNARA_IMAGE_PREFIX="$IMAGE_PREFIX"
+            ./setup.sh --production --use-images --image-tag="$IMAGE_TAG"
+            docker compose -f docker-compose.prod.yml ps
             docker image prune -f
-
-      - name: Deploy via kubectl
-        if: github.event.inputs.target == 'kubernetes'
-        env:
-          KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
-        run: |
-          mkdir -p ~/.kube
-          echo "$KUBE_CONFIG" > ~/.kube/config
-          chmod 600 ~/.kube/config
-          kubectl set image deployment/api api=ghcr.io/${{ github.repository_owner }}/signara-api:${{ github.sha }} -n signara
-          kubectl set image deployment/web web=ghcr.io/${{ github.repository_owner }}/signara-web:${{ github.sha }} -n signara
-          kubectl rollout status deployment/api -n signara --timeout=300s
-          kubectl rollout status deployment/web -n signara --timeout=300s

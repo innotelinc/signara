@@ -2,7 +2,7 @@
 """
 npm-proxy-hosts.py — provision NGINX Proxy Manager hosts for Signara.
 
-Creates/updates the five proxy hosts (app, api, auth, admin, docs) on the
+Creates/updates the four proxy hosts (app, api, auth, admin) on the
 signara.innotel.us domain, forces HTTPS, sets security headers, and requests a
 wildcard Let's Encrypt certificate (*.signara.innotel.us) via DNS-01.
 
@@ -11,7 +11,7 @@ Environment:
     NPM_API_TOKEN    NPM API token (Admin > Access Tokens) (required)
     CF_API_TOKEN     Cloudflare API token for DNS-01        (required for wildcard)
     BASE_DOMAIN      default: signara.innotel.us
-    NPM_ADMIN_TARGET default: http://192.168.1.10:81        (admin subdomain target)
+    NPM_ADMIN_TARGET default: 127.0.0.1                  (admin subdomain target host)
 
 Usage:
     python3 npm-proxy-hosts.py --apply       # create/update hosts + certificate
@@ -34,30 +34,15 @@ BASE_DOMAIN = os.environ.get("BASE_DOMAIN", "signara.innotel.us")
 NPM_URL = os.environ.get("NPM_API_URL", "").rstrip("/")
 NPM_TOKEN = os.environ.get("NPM_API_TOKEN", "")
 CF_TOKEN = os.environ.get("CF_API_TOKEN", "")
-ADMIN_TARGET = os.environ.get(
-    "NPM_ADMIN_TARGET", "http://127.0.0.1:81"
-)  # NPM admin UI
+ADMIN_TARGET = os.environ.get("NPM_ADMIN_TARGET", "127.0.0.1")  # NPM admin UI
 
 # name -> (subdomain, forward host, forward port, websocket, block-common-exploits)
 HOSTS: dict[str, tuple[str, str, int, bool, bool]] = {
-    "app": (f"app.{BASE_DOMAIN}", os.environ.get("WEB_HOST", "http://127.0.0.1"), 3000, True, True),
-    "api": (f"api.{BASE_DOMAIN}", os.environ.get("API_HOST", "http://127.0.0.1"), 8000, True, True),
-    "auth": (f"auth.{BASE_DOMAIN}", os.environ.get("AUTH_HOST", "http://127.0.0.1"), 9000, True, True),
-    "admin": (f"admin.{BASE_DOMAIN}", ADMIN_TARGET, 81, True, True),
-    "docs": (f"docs.{BASE_DOMAIN}", os.environ.get("DOCS_HOST", "http://127.0.0.1"), 8080, False, True),
+    "app": (f"app.{BASE_DOMAIN}", os.environ.get("WEB_HOST", "127.0.0.1"), int(os.environ.get("WEB_PORT", "3000")), True, True),
+    "api": (f"api.{BASE_DOMAIN}", os.environ.get("API_HOST", "127.0.0.1"), int(os.environ.get("API_PORT", "8000")), True, True),
+    "auth": (f"auth.{BASE_DOMAIN}", os.environ.get("AUTH_HOST", "127.0.0.1"), int(os.environ.get("AUTH_PORT", "9100")), True, True),
+    "admin": (f"admin.{BASE_DOMAIN}", ADMIN_TARGET, int(os.environ.get("NPM_ADMIN_PORT", "81")), True, True),
 }
-
-CUSTOM_LOCATIONS: list[dict[str, Any]] = [
-    {
-        "forward_scheme": "http",
-        "forward_host": "127.0.0.1",
-        "forward_port": 8000,
-        "advanced_config": (
-            "location /metrics { deny all; }\n"
-            "location /ready { access_log off; }\n"
-        ),
-    }
-]
 
 CUSTOM_FIELDS = {
     # Security hardening applied to every host (complete list in Security.md).
@@ -70,7 +55,7 @@ CUSTOM_FIELDS = {
 
 
 def _request(method: str, path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
-    """JSON request against the NPM API."""
+    """Make a JSON request against the NPM API."""
     url = f"{NPM_URL}{path}"
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(
@@ -119,8 +104,7 @@ def build_payload(subdomain: str, forward: str, port: int, websocket: bool, bloc
         "caching_enabled": False,
         "allow_websocket_upgrade": websocket,
         "access_list_id": 0,
-        "advanced_config": "",
-        "locations": CUSTOM_LOCATIONS if port == 8000 else [],
+        "advanced_config": "location = /metrics { deny all; }\n" if port == int(os.environ.get("API_PORT", "8000")) else "",
         "meta": {"letsencrypt_agree": True, "dns_challenge": True},
         "certificate": None,
         "custom_fields": CUSTOM_FIELDS,
@@ -128,7 +112,19 @@ def build_payload(subdomain: str, forward: str, port: int, websocket: bool, bloc
 
 
 def ensure_wildcard_certificate() -> int:
-    """Request/renew the wildcard cert via Let's Encrypt DNS-01 (Cloudflare)."""
+    """Reuse or request the wildcard cert via Let's Encrypt DNS-01."""
+    try:
+        certificates = _request("GET", "/api/nginx/certificates")
+        if isinstance(certificates, list):
+            wanted = {f"*.{BASE_DOMAIN}", BASE_DOMAIN}
+            for certificate in certificates:
+                domains = set(certificate.get("domain_names", []))
+                if wanted.issubset(domains) and certificate.get("id"):
+                    print(f"[ok] reusing wildcard certificate id={certificate['id']}")
+                    return int(certificate["id"])
+    except (KeyError, TypeError, ValueError):
+        pass
+
     if not CF_TOKEN:
         print("[error] CF_API_TOKEN required for the wildcard certificate (DNS-01)", file=sys.stderr)
         sys.exit(2)

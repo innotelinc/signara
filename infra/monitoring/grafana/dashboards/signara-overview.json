@@ -73,15 +73,20 @@
     },
     {
       "type": "stat",
-      "title": "Failed jobs (5m)",
+      "title": "Failed jobs",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 10 },
       "targets": [
         {
-          "expr": "sum(rate(bullmq_jobs_failed_total[5m]))"
+          "expr": "sum(bullmq_queue_failed_count)"
         }
       ],
-      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "steps": [ { "color": "green" }, { "color": "red", "value": 1 } ] } } }
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "steps": [{ "color": "green" }, { "color": "red", "value": 1 }] }
+        }
+      }
     },
     {
       "type": "row",
@@ -103,7 +108,13 @@
         "defaults": {
           "unit": "percent",
           "max": 100,
-          "thresholds": { "steps": [ { "color": "green" }, { "color": "orange", "value": 80 }, { "color": "red", "value": 90 } ] }
+          "thresholds": {
+            "steps": [
+              { "color": "green" },
+              { "color": "orange", "value": 80 },
+              { "color": "red", "value": 90 }
+            ]
+          }
         }
       }
     },

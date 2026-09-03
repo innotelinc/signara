@@ -574,7 +574,7 @@ model Signature {
 
   @@index([documentId])
   @@index([requestId])
-  @@index([signerId])
+  @@unique([requestId, signerId])
   @@index([certificateId])
 }
 
