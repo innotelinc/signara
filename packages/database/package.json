@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@prisma/client": "^5.20.0",
-    "prisma": "^5.20.0"
+    "prisma": "^7.10.0"
   },
   "devDependencies": {
     "tsx": "^4.19.0",
