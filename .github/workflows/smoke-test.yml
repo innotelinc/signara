@@ -1,36 +1,33 @@
-name: Smoke Test
+name: Manual Smoke Test
 
 on:
   workflow_dispatch:
-  workflow_run:
-    workflows: [Deploy]
-    types: [completed]
+    inputs:
+      base_url:
+        description: Base URL of the deployed Signara API, including scheme
+        required: true
+        default: https://api.signara.innotel.us
+        type: string
 
 jobs:
   smoke:
-    name: Post-deploy smoke checks
+    name: Check deployed Signara instance
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - name: API readiness
         run: |
           for i in $(seq 1 30); do
-            if curl -fsS --max-time 5 https://api.signara.innotel.us/ready; then break; fi
+            if curl -fsS --max-time 5 "${{ inputs.base_url }}/ready"; then break; fi
             sleep 5
           done
-          curl -fsS https://api.signara.innotel.us/ready | grep -q '"status":"ok"' || exit 1
-
-      - name: Web UI reachable
-        run: curl -fsS -o /dev/null -w "%{http_code}\n" https://app.signara.innotel.us/
+          curl -fsS "${{ inputs.base_url }}/ready" | grep -q '"status":"ok"' || exit 1
 
       - name: Swagger reachable
-        run: curl -fsS -o /dev/null -w "%{http_code}\n" https://api.signara.innotel.us/api/v1/docs
-
-      - name: Auth provider reachable
-        run: curl -fsS -o /dev/null -w "%{http_code}\n" https://auth.signara.innotel.us/if/flow/initialization/ || true # may require bootstrapping
+        run: curl -fsS -o /dev/null -w "%{http_code}\n" "${{ inputs.base_url }}/api/v1/docs"
 
       - name: Metrics exposed (authenticated scrape not required)
-        run: curl -s https://api.signara.innotel.us/metrics | grep -q signara_http_requests_total || echo "metrics not exposed — verify Prometheus job"
+        run: curl -s "${{ inputs.base_url }}/metrics" | grep -q signara_http_requests_total || echo "metrics not exposed — verify Prometheus job"
 
-      - name: Report deployment status
-        run: echo "Smoke tests passed for ${{ github.sha }}"
+      - name: Report smoke-test status
+        run: echo "Smoke tests passed for ${{ inputs.base_url }}"

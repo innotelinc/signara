@@ -64,14 +64,14 @@ signara/
 ├── packages/
 │   ├── shared/                 # Shared DTOs, enums, constants
 │   └── database/               # Prisma schema, migrations, seed
-├── openapi/                    # Complete OpenAPI 3.1 specification
+├── openapi/                    # Complete OpenAPI 3.0.3 specification
 ├── infra/
 │   ├── cerulean/               # Cerulean DNS/NPM/TLS reconciliation
 │   ├── monitoring/             # Prometheus, Grafana, Loki, Alertmanager
 │   ├── nginx/                  # Legacy direct NGINX Proxy Manager automation
 │   └── backup/                 # Backup & restore scripts
 ├── docs/                       # Architecture, Security, Deployment, API, guides...
-├── .github/workflows/          # CI/CD pipelines
+├── .github/workflows/          # CI, security, image publishing, manual smoke checks
 ├── docker-compose.dev.yml      # Full local stack
 ├── docker-compose.prod.yml     # Production stack
 └── setup.sh                    # One-shot provisioner
@@ -131,7 +131,7 @@ TLS, backups, and operations.
 | [docs/DisasterRecovery.md](docs/DisasterRecovery.md)       | RPO/RTO, restore drills, runbooks          |
 
 The interactive API reference is served by the API itself
-(dev: http://localhost:8000/api/v1/docs); the full OpenAPI 3.1 spec lives in
+(dev: http://localhost:8000/api/v1/docs); the full OpenAPI 3.0.3 spec lives in
 [openapi/openapi.yaml](openapi/openapi.yaml).
 
 ## Development
@@ -144,10 +144,22 @@ make dev     # API on :8000, web on :3000, with the rest of the stack via `make 
 
 See [docs/DeveloperGuide.md](docs/DeveloperGuide.md).
 
-## CI/CD
+## Automation and deployment
 
-GitHub Actions pipelines run lint, tests, CodeQL + dependency scanning, container builds
-(with SBOM generation), and publish images on tag. See [.github/workflows](.github/workflows).
+GitHub Actions run lint, tests, CodeQL and dependency scanning, validate Compose, and
+publish container images with SBOMs. They do not connect to or deploy any server.
+
+Deploy on the target host with the regular operator workflow:
+
+```bash
+git clone https://github.com/innotelinc/signara.git signara
+cd signara
+./setup.sh --production
+```
+
+Use `./setup.sh --production --with-cerulean` when Cerulean should provision DNS,
+NGINX Proxy Manager hosts, and TLS. The optional manual smoke workflow can verify a
+deployed API URL after setup; it does not perform deployment.
 
 ## Community & contribution
 
