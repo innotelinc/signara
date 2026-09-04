@@ -137,8 +137,12 @@ if [[ "$MODE" == production ]]; then
     [[ "$value" == https://* ]] || fail "$key must use an https:// URL for production"
   done
 
-  log "Starting production dependencies..."
-  docker compose -f docker-compose.prod.yml up -d postgres redis minio meilisearch authentik-db authentik-redis
+  log "Starting production application dependencies..."
+  docker compose -f docker-compose.prod.yml up -d postgres redis minio meilisearch
+  if [[ "${AUTHENTIK_MODE:-remote}" == local ]]; then
+    log "Starting the optional local Authentik replacement..."
+    docker compose -f docker-compose.prod.yml --profile authentik up -d authentik-db authentik-redis authentik-server authentik-worker
+  fi
   if (( USE_IMAGES )); then
     log "Pulling the configured production API and web images..."
     docker compose -f docker-compose.prod.yml pull api frontend migrate
@@ -156,8 +160,12 @@ else
   if [[ "${WEB_URL:-}" != http://localhost:3000 ]]; then
     warn "WEB_URL is ${WEB_URL:-unset}; local browser requests require WEB_URL=http://localhost:3000"
   fi
-  log "Starting development dependencies..."
-  docker compose -f docker-compose.dev.yml up -d postgres redis minio meilisearch authentik-db authentik-redis
+  log "Starting development application dependencies..."
+  docker compose -f docker-compose.dev.yml up -d postgres redis minio meilisearch
+  if [[ "${AUTHENTIK_MODE:-remote}" == local ]]; then
+    log "Starting the optional local Authentik replacement..."
+    docker compose -f docker-compose.dev.yml --profile authentik up -d authentik-db authentik-redis authentik-server authentik-worker
+  fi
   log "Applying development migrations in the Compose network..."
   docker compose -f docker-compose.dev.yml run --rm --build migrate
   log "Building and starting the development stack..."

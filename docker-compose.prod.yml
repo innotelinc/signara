@@ -66,9 +66,9 @@ services:
       REDIS_URL: redis://:${REDIS_PASSWORD:-change-me}@redis:6379
       S3_ENDPOINT: http://minio:9000
       MEILISEARCH_HOST: http://meilisearch:7700
-      OIDC_JWKS_URL: http://authentik-server:9000/application/o/signara/jwks/
-      OIDC_TOKEN_URL: http://authentik-server:9000/application/o/token/
-      OIDC_USERINFO_URL: http://authentik-server:9000/application/o/userinfo/
+      OIDC_JWKS_URL: ${OIDC_JWKS_URL:-https://auth.signara.innotel.us/application/o/signara/jwks/}
+      OIDC_TOKEN_URL: ${OIDC_TOKEN_URL:-https://auth.signara.innotel.us/application/o/token/}
+      OIDC_USERINFO_URL: ${OIDC_USERINFO_URL:-https://auth.signara.innotel.us/application/o/userinfo/}
     ports:
       - '${API_BIND_ADDRESS:-127.0.0.1}:${API_BIND_PORT:-8000}:8000'
     depends_on:
@@ -199,6 +199,7 @@ services:
     logging: *logging-default
 
   authentik-server:
+    profiles: ["authentik"]
     image: ghcr.io/goauthentik/server:2024.8.1
     restart: unless-stopped
     command: server
@@ -231,6 +232,7 @@ services:
     logging: *logging-default
 
   authentik-worker:
+    profiles: ["authentik"]
     image: ghcr.io/goauthentik/server:2024.8.1
     restart: unless-stopped
     command: worker
@@ -250,6 +252,7 @@ services:
     logging: *logging-default
 
   authentik-db:
+    profiles: ["authentik"]
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
@@ -266,6 +269,7 @@ services:
     logging: *logging-default
 
   authentik-redis:
+    profiles: ["authentik"]
     image: redis:7-alpine
     restart: unless-stopped
     command: ['redis-server', '--appendonly', 'yes']
@@ -338,9 +342,9 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-signara}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
       POSTGRES_DB: ${POSTGRES_DB:-signara}
-      AUTHENTIK_POSTGRES_HOST: authentik-db
+      AUTHENTIK_POSTGRES_HOST: ${AUTHENTIK_POSTGRES_HOST:-}
       AUTHENTIK_POSTGRES_USER: authentik
-      AUTHENTIK_POSTGRES_PASSWORD: ${AUTHENTIK_DB_PASSWORD:-change-me-authentik-db}
+      AUTHENTIK_POSTGRES_PASSWORD: ${AUTHENTIK_DB_PASSWORD:-}
       AUTHENTIK_POSTGRES_DB: authentik
       SOURCE_S3_ENDPOINT: http://minio:9000
       SOURCE_S3_BUCKET: ${S3_BUCKET:-signara-documents}
@@ -360,8 +364,6 @@ services:
       - backupcache:/backup-cache
     depends_on:
       postgres:
-        condition: service_healthy
-      authentik-db:
         condition: service_healthy
       minio:
         condition: service_healthy
