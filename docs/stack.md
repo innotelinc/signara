@@ -31,6 +31,7 @@ provides, and explicitly does not own.
 - Infisical — secrets, OAuth secrets
 - ONYX — document storage
 - Magnate — subscriptions and entitlements
+- NPM Edge — public routing, TLS termination at the edge
 
 ## Explicitly does NOT own
 
