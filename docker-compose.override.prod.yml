@@ -1,0 +1,41 @@
+# docker-compose.override.prod.yml — deployment tweaks layered on
+# docker-compose.prod.yml:
+#
+#   docker compose -f docker-compose.prod.yml -f docker-compose.override.prod.yml up -d
+#
+# Fixes the API healthcheck: the stock probe uses `wget localhost`, but
+# `localhost` resolves to ::1 inside the container while the app binds IPv4
+# (0.0.0.0) only, so the probe always fails and the API is marked unhealthy.
+services:
+  api:
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:8000/ready']
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  frontend:
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:3000/']
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # Observability + backup are opt-in (they are otherwise in the default set
+  # and cost ~2 GB on modest hosts). Start with:
+  #   docker compose -f docker-compose.prod.yml -f docker-compose.override.prod.yml \
+  #     --profile monitoring up -d prometheus grafana loki alertmanager backup backup-metrics
+  prometheus:
+    profiles: ['monitoring']
+  grafana:
+    profiles: ['monitoring']
+  loki:
+    profiles: ['monitoring']
+  alertmanager:
+    profiles: ['monitoring']
+  backup:
+    profiles: ['monitoring']
+  backup-metrics:
+    profiles: ['monitoring']
