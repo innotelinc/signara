@@ -186,6 +186,23 @@ Authentik runs as part of both Compose stacks.
 Authentik also supports SAML and SCIM integrations for enterprise identity
 lifecycle management; configure those through the Authentik administration UI.
 
+### Login round-trip (app vs api host)
+
+The web app lives on `app.<domain>` and the API on `api.<domain>`. The OIDC
+callback runs on the API and must land the browser back in the **web app**, and
+the session cookies must be visible on **both** subdomains so the app's
+server-side `layout.tsx` can read `signara_access`:
+
+- The callback redirects to `WEB_URL` (default `https://app.signara.innotel.us`)
+  instead of a raw path on the API host (which returned a NestJS 404 page).
+- Auth cookies (`signara_access`, `signara_refresh`, `signara_oidc_state`) are
+  set with `Domain` derived from `API_URL` (e.g. `.signara.innotel.us`), so the
+  app subdomain receives them. Set `COOKIE_DOMAIN` explicitly to override;
+  leave empty for bare hosts/IPs (local dev).
+
+Verify with a real browser: sign in at `https://app.signara.innotel.us` →
+you land back on the dashboard, not an API error page.
+
 ## 5. Certificate-backed signing
 
 The API supports ACME, Cerulean, and internal PKI providers. Private key
