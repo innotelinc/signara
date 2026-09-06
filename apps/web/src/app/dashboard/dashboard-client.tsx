@@ -2,7 +2,15 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { FileText, Clock, CheckCircle2, FileSignature } from 'lucide-react';
+import {
+  FileText,
+  Clock,
+  CheckCircle2,
+  FileSignature,
+  FolderUp,
+  LayoutTemplate,
+  ShieldCheck,
+} from 'lucide-react';
 import { api, ApiError } from '@/lib/api';
 import { Badge, Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Spinner } from '@/components/ui/button';
@@ -12,6 +20,12 @@ interface RecentDocument {
   title: string;
   status: string;
   updatedAt: string;
+}
+
+interface Me {
+  email: string;
+  displayName: string | null;
+  org?: { slug: string };
 }
 
 const STATUS_TONE: Record<string, 'gray' | 'green' | 'blue' | 'amber' | 'red'> = {
@@ -24,9 +38,16 @@ const STATUS_TONE: Record<string, 'gray' | 'green' | 'blue' | 'amber' | 'red'> =
   EXPIRED: 'red',
 };
 
+const QUICK_ACTIONS = [
+  { href: '/documents', label: 'Upload document', icon: FolderUp },
+  { href: '/templates', label: 'Create template', icon: LayoutTemplate },
+  { href: '/settings', label: 'Manage settings', icon: ShieldCheck },
+];
+
 export function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [me, setMe] = useState<Me | null>(null);
   const [stats, setStats] = useState({ total: 0, awaiting: 0, completed: 0 });
   const [recent, setRecent] = useState<RecentDocument[]>([]);
 
@@ -35,10 +56,11 @@ export function Dashboard() {
     (async () => {
       try {
         const [user, documents] = await Promise.all([
-          api.get<{ email: string; displayName: string | null; org?: { slug: string; role: string } }>('/api/v1/auth/me'),
+          api.get<Me>('/api/v1/auth/me'),
           api.get<{ total: number; items: RecentDocument[] }>('/api/v1/documents?limit=8'),
         ]);
         if (cancelled) return;
+        setMe(user);
         setStats({
           total: documents.total,
           awaiting: documents.items.filter((d) => d.status === 'AWAITING_SIGNATURE' || d.status === 'IN_PROGRESS').length,
@@ -73,12 +95,22 @@ export function Dashboard() {
     { label: 'Completed', value: stats.completed, icon: CheckCircle2 },
   ];
 
+  const firstName = (me?.displayName ?? me?.email ?? '').split(/\s+/)[0] || 'there';
+
   return (
     <div>
-      <div className="mb-6 flex items-center justify-between">
+      <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold">Dashboard</h1>
-          <p className="text-sm text-slate-500">Overview of your documents and signing activity.</p>
+          <h1 className="text-2xl font-semibold">Welcome back, {firstName}.</h1>
+          <p className="mt-1 text-sm text-slate-500">
+            Overview of your documents and signing activity
+            {me?.org ? (
+              <>
+                {' '}in <span className="font-medium text-slate-700">{me.org.slug}</span>
+              </>
+            ) : null}
+            .
+          </p>
         </div>
         <Link href="/documents" className="btn-primary">
           <FileSignature className="h-4 w-4" />
@@ -89,6 +121,22 @@ export function Dashboard() {
       {error && (
         <div className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
       )}
+
+      {/* Quick actions */}
+      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
+        {QUICK_ACTIONS.map(({ href, label, icon: Icon }) => (
+          <Link
+            key={href}
+            href={href}
+            className="flex items-center gap-4 rounded-xl border border-slate-200 bg-white px-5 py-4 shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary-200 hover:shadow-md"
+          >
+            <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary-50">
+              <Icon className="h-5 w-5 text-primary-600" />
+            </span>
+            <span className="text-sm font-semibold">{label}</span>
+          </Link>
+        ))}
+      </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         {statCards.map(({ label, value, icon: Icon }) => (
@@ -112,9 +160,15 @@ export function Dashboard() {
         </CardHeader>
         <CardContent className="px-0">
           {recent.length === 0 ? (
-            <p className="px-5 py-8 text-center text-sm text-slate-500">
-              No documents yet. Upload your first PDF, DOCX, or image.
-            </p>
+            <div className="px-5 py-10 text-center">
+              <FileSignature className="mx-auto mb-3 h-8 w-8 text-slate-300" />
+              <p className="text-sm text-slate-500">
+                No documents yet. Upload your first PDF, DOCX, or image to get started.
+              </p>
+              <Link href="/documents" className="btn-primary mt-4">
+                Upload your first document
+              </Link>
+            </div>
           ) : (
             <table className="w-full">
               <thead className="border-b border-slate-200">
@@ -127,7 +181,11 @@ export function Dashboard() {
               <tbody className="divide-y divide-slate-100">
                 {recent.map((doc) => (
                   <tr key={doc.id} className="hover:bg-slate-50">
-                    <td className="td font-medium">{doc.title}</td>
+                    <td className="td">
+                      <Link href={`/documents/${doc.id}`} className="font-medium hover:text-primary-700">
+                        {doc.title}
+                      </Link>
+                    </td>
                     <td className="td">
                       <Badge tone={STATUS_TONE[doc.status] ?? 'gray'}>{doc.status.replaceAll('_', ' ')}</Badge>
                     </td>

@@ -1,12 +1,13 @@
+import type { Metadata } from 'next';
 import { AppShell } from '@/components/layout/app-shell';
+import { Settings } from './settings-client';
+
+export const metadata: Metadata = { title: 'Settings' };
 
 export default function SettingsPage() {
   return (
     <AppShell>
-      <div>
-        <h1 className="text-2xl font-semibold">Settings</h1>
-        <p className="text-sm text-slate-500">Organization profile, workspace, team, and billing management.</p>
-      </div>
+      <Settings />
     </AppShell>
   );
 }
