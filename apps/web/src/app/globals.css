@@ -17,6 +17,10 @@
     @apply bg-slate-50 text-ink-900;
   }
 
+  ::selection {
+    @apply bg-primary-500/20;
+  }
+
   *:focus-visible {
     @apply outline-none ring-2 ring-primary-500 ring-offset-2;
   }
@@ -28,15 +32,15 @@
   }
 
   .btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all duration-150 disabled:cursor-not-allowed disabled:opacity-50 active:scale-[0.98];
   }
 
   .btn-primary {
-    @apply btn bg-primary-500 text-white hover:bg-primary-600;
+    @apply btn bg-primary-500 text-white shadow-sm hover:bg-primary-600 hover:shadow-md;
   }
 
   .btn-outline {
-    @apply btn border border-slate-300 bg-white text-ink-800 hover:bg-slate-50;
+    @apply btn border border-slate-300 bg-white text-ink-800 hover:border-slate-400 hover:bg-slate-50;
   }
 
   .btn-danger {
