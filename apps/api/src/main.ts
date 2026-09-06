@@ -10,6 +10,14 @@ import { ConfigService } from '@nestjs/config';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
+
+// Prisma stores byte counts as BigInt, which JSON.stringify rejects. Serialize
+// them as Numbers so every response (documents, versions, …) round-trips.
+if (typeof BigInt !== 'undefined' && !(BigInt.prototype as never as { toJSON?: unknown }).toJSON) {
+  (BigInt.prototype as never as { toJSON: () => number }).toJSON = function () {
+    return Number(this);
+  };
+}
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 
