@@ -79,7 +79,9 @@ export class AuthController {
     );
 
     this.setAuthCookies(res, pair.accessToken, pair.refreshToken);
-    return res.redirect(nextPath);
+    // Land the browser in the web app (app.<domain>), not on a raw API 404.
+    const webUrl = this.auth.webUrl();
+    return res.redirect(new URL(nextPath, webUrl).toString());
   }
 
   /** Refreshes the access token using the refresh cookie. */
@@ -131,12 +133,14 @@ export class AuthController {
   }
 
   private cookieOptions(maxAgeSeconds: number) {
+    const domain = this.auth.cookieDomain();
     return {
       httpOnly: true,
       secure: process.env.SESSION_COOKIE_SECURE === 'true',
       sameSite: 'lax' as const,
       maxAge: maxAgeSeconds * 1000,
       path: '/',
+      ...(domain ? { domain } : {}),
     };
   }
 

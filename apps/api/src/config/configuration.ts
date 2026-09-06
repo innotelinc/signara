@@ -45,6 +45,12 @@ export default () => ({
     jwtRefreshTtl: process.env.JWT_REFRESH_TTL ?? '30d',
     cryptoMasterKey: process.env.CRYPTO_MASTER_KEY ?? '',
     cookieSecure: process.env.SESSION_COOKIE_SECURE === 'true',
+    // Shared cookie domain so the httpOnly session cookies set by the API
+    // (api.<domain>) are also visible to the web app (app.<domain>). Auto-
+    // derived from API_URL when not set explicitly; empty for bare hosts/IPs.
+    cookieDomain:
+      process.env.COOKIE_DOMAIN ??
+      deriveCookieDomain(process.env.API_URL ?? 'https://api.signara.innotel.us'),
   },
   certificates: {
     acmeDirectoryUrl: process.env.ACME_DIRECTORY_URL ?? '',
@@ -78,3 +84,23 @@ export default () => ({
     sentryDsn: process.env.SENTRY_DSN ?? '',
   },
 });
+
+/**
+ * Derives the cookie domain from the API host so the web app (a sibling
+ * subdomain, e.g. app.signara.innotel.us) receives the session cookies the
+ * API sets. Returns '' when the host is localhost, an IP, or a bare single-
+ * label host (no shared parent domain to pin).
+ */
+function deriveCookieDomain(apiUrl: string): string {
+  try {
+    const host = new URL(apiUrl).hostname;
+    const labels = host.split('.');
+    // Two labels → already the registrable domain (e.g. example.com); three or
+    // more → strip the service subdomain (api. → .signara.innotel.us).
+    if (labels.length < 2) return '';
+    if (labels.length === 2) return `.${host}`;
+    return `.${labels.slice(1).join('.')}`;
+  } catch {
+    return '';
+  }
+}

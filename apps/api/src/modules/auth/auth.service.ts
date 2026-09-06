@@ -30,6 +30,16 @@ export class AuthService {
     private readonly prisma: PrismaService,
   ) {}
 
+  /** Web app origin — where the OIDC callback should land the browser. */
+  webUrl(): string {
+    return this.config.get<string>('app.webUrl') ?? 'https://app.signara.innotel.us';
+  }
+
+  /** Shared cookie domain so app.<domain> sees the API's session cookies. */
+  cookieDomain(): string {
+    return this.config.get<string>('auth.cookieDomain') ?? '';
+  }
+
   buildLoginUrl(state: string): string {
     const params = new URLSearchParams({
       client_id: this.config.get<string>('oidc.clientId') ?? '',
