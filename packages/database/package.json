@@ -8,6 +8,7 @@
     "db:migrate": "prisma migrate deploy",
     "db:dev": "prisma migrate dev",
     "db:seed": "tsx prisma/seed.ts",
+    "db:seed:rbac": "tsx prisma/seed.ts --rbac-only",
     "db:studio": "prisma studio"
   },
   "dependencies": {

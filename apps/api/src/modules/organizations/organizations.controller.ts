@@ -1,10 +1,32 @@
 import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { WorkspaceVisibility } from '@prisma/client';
-import { IsEnum, IsOptional, IsString } from 'class-validator';
+import { IsEnum, IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator';
 import { OrganizationsService } from './organizations.service';
-import { CurrentUser, Permissions, TenantRequired } from '../../common/decorators';
+import {
+  CurrentUser,
+  Permissions,
+  TenantOptional,
+  TenantRequired,
+} from '../../common/decorators';
 import { AuthenticatedUser } from '../../common/types';
+
+class CreateOrganizationDto {
+  @IsString()
+  @MinLength(2)
+  @MaxLength(120)
+  name!: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^[a-z0-9][a-z0-9-]{0,118}[a-z0-9]$/)
+  slug?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  legalName?: string;
+}
 
 class UpdateOrganizationDto {
   @IsOptional() @IsString() name?: string;
@@ -32,6 +54,18 @@ class CreateTeamDto {
 @TenantRequired()
 export class OrganizationsController {
   constructor(private readonly organizations: OrganizationsService) {}
+
+  /**
+   * Onboarding — create the caller's first organization. Authenticated but
+   * deliberately tenant-optional: this is the only way a user with no
+   * membership can leave the "No active tenant" dead end.
+   */
+  @Post()
+  @TenantOptional()
+  @ApiOperation({ summary: 'Create an organization (first-time onboarding)' })
+  create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateOrganizationDto) {
+    return this.organizations.createOrganization(user, dto);
+  }
 
   @Get('current')
   @Permissions('organizations.read')

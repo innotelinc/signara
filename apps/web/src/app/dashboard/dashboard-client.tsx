@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import { api, ApiError } from '@/lib/api';
 import { Badge, Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Spinner } from '@/components/ui/button';
+import { Button, Spinner } from '@/components/ui/button';
 
 interface RecentDocument {
   id: string;
@@ -44,6 +44,63 @@ const QUICK_ACTIONS = [
   { href: '/settings', label: 'Manage settings', icon: ShieldCheck },
 ];
 
+/** First-run state: the signed-in user belongs to no organization yet. */
+function Onboarding() {
+  const [name, setName] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function createOrganization() {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.post('/api/v1/organizations', { name });
+      // Reload so the freshly-resolved tenant context flows through the app.
+      window.location.reload();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to create organization');
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mx-auto max-w-lg">
+      <Card>
+        <CardHeader>
+          <CardTitle>Create your organization</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-slate-500">
+            You&apos;re signed in but not part of an organization yet. Create one to start
+            uploading documents and sending signing requests.
+          </p>
+          <div>
+            <label className="label" htmlFor="org-name">Organization name</label>
+            <input
+              id="org-name"
+              className="input"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. Acme Corp"
+              autoFocus
+            />
+          </div>
+          {error && (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {error}
+            </div>
+          )}
+          <div className="flex justify-end">
+            <Button onClick={() => void createOrganization()} loading={busy} disabled={name.trim().length < 2}>
+              Create organization
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 export function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -55,19 +112,23 @@ export function Dashboard() {
     let cancelled = false;
     (async () => {
       try {
-        const [user, documents] = await Promise.all([
-          api.get<Me>('/api/v1/auth/me'),
-          api.get<{ total: number; items: RecentDocument[] }>('/api/v1/documents?limit=8'),
-        ]);
+        const user = await api.get<Me>('/api/v1/auth/me');
         if (cancelled) return;
         setMe(user);
-        setStats({
-          total: documents.total,
-          awaiting: documents.items.filter((d) => d.status === 'AWAITING_SIGNATURE' || d.status === 'IN_PROGRESS').length,
-          completed: documents.items.filter((d) => d.status === 'COMPLETED').length,
-        });
-        setRecent(documents.items);
         document.title = `${user.displayName ?? user.email} · Signara`;
+        // Without a tenant the tenant-scoped document call would only 403.
+        if (user.org) {
+          const documents = await api.get<{ total: number; items: RecentDocument[] }>(
+            '/api/v1/documents?limit=8',
+          );
+          if (cancelled) return;
+          setStats({
+            total: documents.total,
+            awaiting: documents.items.filter((d) => d.status === 'AWAITING_SIGNATURE' || d.status === 'IN_PROGRESS').length,
+            completed: documents.items.filter((d) => d.status === 'COMPLETED').length,
+          });
+          setRecent(documents.items);
+        }
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof ApiError ? err.message : 'Failed to load dashboard');
@@ -87,6 +148,11 @@ export function Dashboard() {
         <Spinner className="h-8 w-8 text-primary-500" />
       </div>
     );
+  }
+
+  // First-run onboarding gate.
+  if (me && !me.org) {
+    return <Onboarding />;
   }
 
   const statCards = [
