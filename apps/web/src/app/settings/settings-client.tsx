@@ -13,6 +13,8 @@ import {
 import { api, ApiError } from '@/lib/api';
 import { Badge, Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button, Spinner } from '@/components/ui/button';
+import { TeamMembersTable } from '@/components/team-members-table';
+import { mapMembers, type MembershipItem, type OrgMember } from '@/lib/org-members';
 import { cn } from '@/lib/cn';
 
 interface Me {
@@ -29,15 +31,8 @@ interface Org {
   slug: string;
   legalName?: string | null;
   taxId?: string | null;
-  billingAccount?: { plan: string; status: string; seatsLimit: number | null; currentPeriodEnd: string | null } | null;
+  billingAccount?: { plan: string | null; status: string | null; seatsLimit: number | null; currentPeriodEnd: string | null } | null;
   _count?: { memberships: number; documents: number; workspaces: number };
-}
-
-interface Member {
-  id: string;
-  email: string;
-  displayName?: string | null;
-  role: string;
 }
 
 type Tab = 'profile' | 'organization' | 'team' | 'billing';
@@ -53,7 +48,7 @@ export function Settings() {
   const [tab, setTab] = useState<Tab>('profile');
   const [me, setMe] = useState<Me | null>(null);
   const [org, setOrg] = useState<Org | null>(null);
-  const [members, setMembers] = useState<Member[]>([]);
+  const [members, setMembers] = useState<OrgMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -93,8 +88,8 @@ export function Settings() {
 
   const loadMembers = useCallback(async () => {
     try {
-      const result = await api.get<{ total: number; items: Member[] }>('/api/v1/users?limit=50');
-      setMembers(result.items);
+      const result = await api.get<{ total: number; items: MembershipItem[] }>('/api/v1/users?limit=50');
+      setMembers(mapMembers(result.items));
     } catch {
       // Team tab may be permission-gated; leave the list empty.
     }
@@ -309,53 +304,7 @@ export function Settings() {
             </Card>
           )}
 
-          {tab === 'team' && (
-            <Card>
-              <CardHeader>
-                <CardTitle>Team</CardTitle>
-              </CardHeader>
-              <CardContent className="px-0">
-                {members.length === 0 ? (
-                  <p className="px-5 py-8 text-center text-sm text-slate-500">
-                    No members listed. Invite teammates to collaborate on documents.
-                  </p>
-                ) : (
-                  <table className="w-full">
-                    <thead className="border-b border-slate-200">
-                      <tr>
-                        <th className="th">Member</th>
-                        <th className="th">Role</th>
-                        <th className="th">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {members.map((member) => (
-                        <tr key={member.id} className="hover:bg-slate-50">
-                          <td className="td">
-                            <div className="flex items-center gap-3">
-                              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-primary-100 text-xs font-bold text-primary-700">
-                                {(member.displayName ?? member.email).slice(0, 1).toUpperCase()}
-                              </span>
-                              <div>
-                                <p className="font-medium">{member.displayName ?? '—'}</p>
-                                <p className="text-xs text-slate-500">{member.email}</p>
-                              </div>
-                            </div>
-                          </td>
-                          <td className="td">
-                            <Badge tone={member.role === 'OWNER' ? 'amber' : 'blue'}>{member.role}</Badge>
-                          </td>
-                          <td className="td">
-                            <Badge tone="green">Active</Badge>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </CardContent>
-            </Card>
-          )}
+          {tab === 'team' && <TeamMembersTable members={members} />}
 
           {tab === 'billing' && (
             <Card>
@@ -367,11 +316,11 @@ export function Settings() {
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                     <div className="rounded-lg border border-slate-100 bg-slate-50 px-4 py-3">
                       <p className="text-xs text-slate-500">Plan</p>
-                      <p className="text-lg font-semibold capitalize">{org.billingAccount.plan}</p>
+                      <p className="text-lg font-semibold capitalize">{org.billingAccount.plan ?? '—'}</p>
                     </div>
                     <div className="rounded-lg border border-slate-100 bg-slate-50 px-4 py-3">
                       <p className="text-xs text-slate-500">Status</p>
-                      <p className="text-lg font-semibold capitalize">{org.billingAccount.status.toLowerCase()}</p>
+                      <p className="text-lg font-semibold capitalize">{org.billingAccount.status?.toLowerCase() ?? '—'}</p>
                     </div>
                     <div className="rounded-lg border border-slate-100 bg-slate-50 px-4 py-3">
                       <p className="text-xs text-slate-500">Seats</p>
