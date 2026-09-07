@@ -128,6 +128,31 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
 
   # -------------------------------------------------------- organizations ---
+  /organizations:
+    post:
+      tags: [organizations]
+      x-tenant-required: false
+      summary: Create your first organization (onboarding)
+      description: >
+        For authenticated users who do not belong to any organization yet.
+        Creates the tenant, an OWNER membership for the caller, a default
+        workspace, and a Community billing account in one transaction.
+        Returns 409 if the caller already has an active organization.
+      security:
+        - access-token: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OrganizationCreate' }
+      responses:
+        '201':
+          description: Created organization
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OrganizationDetail' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { $ref: '#/components/responses/Conflict' }
   /organizations/current:
     get:
       tags: [organizations]
@@ -1400,6 +1425,22 @@ components:
         trialEndsAt: { type: string, format: date-time, nullable: true }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
+    OrganizationCreate:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 120
+          description: Display name of the new organization
+        slug:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9-]{0,118}[a-z0-9]$'
+          description: Optional unique slug (defaults to a slugified name)
+        legalName:
+          type: string
+          maxLength: 255
     OrganizationUpdate:
       type: object
       properties:

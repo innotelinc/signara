@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { MembershipRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { resolveSystemRoleId } from '../../common/roles';
 import { AuthenticatedUser } from '../../common/types';
 
 @Injectable()
@@ -119,8 +120,14 @@ export class UsersService {
       });
     }
 
+    const systemRoleId = await resolveSystemRoleId(this.prisma, data.role);
     const membership = await this.prisma.membership.create({
-      data: { organizationId: orgId, userId: memberUser.id, role: data.role },
+      data: {
+        organizationId: orgId,
+        userId: memberUser.id,
+        role: data.role,
+        roleId: systemRoleId,
+      },
     });
 
     if (data.workspaceIds?.length) {
@@ -140,9 +147,10 @@ export class UsersService {
     if (!orgId) throw new ForbiddenException('No active tenant');
     this.assertCanManage(user, orgId);
 
+    const systemRoleId = await resolveSystemRoleId(this.prisma, role);
     return this.prisma.membership.update({
       where: { id: memberId, organizationId: orgId },
-      data: { role },
+      data: { role, roleId: systemRoleId },
     });
   }
 

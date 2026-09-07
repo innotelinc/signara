@@ -8,6 +8,10 @@
  *
  * Run: `npm run db:seed` (workspace @signara/database)
  * Safe to re-run (idempotent, uses upserts).
+ *
+ * `npm run db:seed -- --rbac-only` seeds just the RBAC catalog
+ * (permissions + roles) and billing plans — no demo tenant/users — for
+ * deployments that apply migrations without the full seed.
  */
 import { PrismaClient, MembershipRole, PlatformRole, PlanCode } from '@prisma/client';
 
@@ -203,9 +207,14 @@ async function seedDemo() {
 }
 
 async function main() {
+  const rbacOnly = process.argv.includes('--rbac-only');
   await seedPermissions();
   await seedRoles();
   await seedPlans();
+  if (rbacOnly) {
+    console.log('RBAC-only seed complete (permissions, roles, plans) ✓');
+    return;
+  }
   await seedDemo();
   console.log('Seed complete ✓');
 }

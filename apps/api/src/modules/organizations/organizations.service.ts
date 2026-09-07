@@ -1,7 +1,21 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { WorkspaceVisibility } from '@prisma/client';
+import {
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { MembershipRole, PlanCode, WorkspaceVisibility } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { resolveSystemRoleId } from '../../common/roles';
 import { AuthenticatedUser } from '../../common/types';
+
+function slugify(input: string): string {
+  return input
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60);
+}
 
 @Injectable()
 export class OrganizationsService {
@@ -58,13 +72,7 @@ export class OrganizationsService {
   ) {
     const orgId = user.org?.id!;
     this.assertManager(user);
-    const slug =
-      data.slug ??
-      data.name
-        .toLowerCase()
-        .replace(/[^a-z0-9-]+/g, '-')
-        .replace(/^-+|-+$/g, '')
-        .slice(0, 60);
+    const slug = data.slug ?? slugify(data.name);
     return this.prisma.workspace.create({
       data: {
         organizationId: orgId,
@@ -120,6 +128,72 @@ export class OrganizationsService {
       });
     }
     return team;
+  }
+
+  /**
+   * Onboarding: creates the caller's first organization. Only reachable for
+   * authenticated users without a resolved tenant — anyone already in an
+   * organization invites new members instead of creating a second tenant
+   * (there is no tenant switcher yet).
+   */
+  async createOrganization(
+    user: AuthenticatedUser,
+    data: { name: string; slug?: string; legalName?: string },
+  ) {
+    if (user.org) {
+      throw new ConflictException(
+        'You already belong to an organization. New members join through an invite from its owner.',
+      );
+    }
+
+    const name = data.name.trim();
+    if (name.length < 2) throw new ConflictException('Organization name is too short');
+
+    const slug = await this.uniqueOrgSlug(data.slug ? slugify(data.slug) : slugify(name));
+    const ownerRoleId = await resolveSystemRoleId(this.prisma, MembershipRole.OWNER);
+
+    return this.prisma.organization.create({
+      data: {
+        name,
+        slug,
+        legalName: data.legalName?.trim() || null,
+        status: 'ACTIVE',
+        memberships: {
+          create: { userId: user.id, role: MembershipRole.OWNER, roleId: ownerRoleId },
+        },
+        billingAccount: {
+          create: { plan: PlanCode.COMMUNITY, status: 'ACTIVE', seatsLimit: 1 },
+        },
+        workspaces: {
+          create: {
+            name: 'Default Workspace',
+            slug: 'default',
+            isDefault: true,
+            createdById: user.id,
+          },
+        },
+      },
+      include: {
+        billingAccount: {
+          select: { plan: true, status: true, seatsLimit: true, currentPeriodEnd: true },
+        },
+        _count: { select: { memberships: true, documents: true, workspaces: true } },
+      },
+    });
+  }
+
+  /** First free slug for an organization (slug is globally unique). */
+  private async uniqueOrgSlug(baseSlug: string): Promise<string> {
+    if (!baseSlug) throw new ConflictException('Could not derive a slug from the organization name');
+    for (let i = 0; i < 20; i++) {
+      const candidate = i === 0 ? baseSlug : `${baseSlug.slice(0, 56)}-${i + 1}`;
+      const existing = await this.prisma.organization.findUnique({
+        where: { slug: candidate },
+        select: { id: true },
+      });
+      if (!existing) return candidate;
+    }
+    throw new ConflictException('Could not allocate a unique slug, try a more specific name');
   }
 
   private async assertWorkspaceInTenant(

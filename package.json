@@ -22,6 +22,7 @@
     "db:generate": "npm run db:generate -w @signara/database",
     "db:migrate": "npm run db:migrate -w @signara/database",
     "db:seed": "npm run db:seed -w @signara/database",
+    "db:seed:rbac": "npm run db:seed:rbac -w @signara/database",
     "db:studio": "npm run db:studio -w @signara/database",
     "typecheck": "npm run typecheck --workspaces --if-present"
   },
