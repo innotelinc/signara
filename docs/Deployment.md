@@ -31,10 +31,14 @@ npm install
 docker compose -f docker-compose.dev.yml up -d --build
 ```
 
-The development stack exposes the web UI on `http://localhost:3000`, the API
-on `http://localhost:8000`, Authentik on `http://localhost:9100`, MinIO on
-`http://localhost:9001`, Prometheus on `http://localhost:9090`, and Grafana on
-`http://localhost:3001`.
+The development stack exposes the web UI on `http://localhost:3010`, the API
+on `http://localhost:8010`, Authentik on `http://localhost:9110`, MinIO on
+`http://localhost:9005` (console `:9006`), Prometheus on
+`http://localhost:9091`, and Grafana on `http://localhost:3007`.
+
+Dev published ports are deliberately disjoint from the shared production
+stack (which owns `:3000/:8000/:9000/:9002/:5432/:6379/:7700` and friends) so
+the dev and prod stacks can run on the same host without port collisions.
 
 ### Production
 
