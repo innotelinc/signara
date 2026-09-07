@@ -11,6 +11,9 @@ export const Public = () => SetMetadata(IS_PUBLIC_KEY, true);
 /** Requires the tenant (organization) context to be resolved. */
 export const TenantRequired = () => SetMetadata(TENANT_REQUIRED_KEY, true);
 
+/** Marks a route as tenant-optional: still authenticated, but no org context required. */
+export const TenantOptional = () => SetMetadata(TENANT_REQUIRED_KEY, false);
+
 /** Requires the caller to hold at least one of the given permission codes. */
 export const Permissions = (...codes: string[]) => SetMetadata(PERMISSIONS_KEY, codes);
 

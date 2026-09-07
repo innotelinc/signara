@@ -115,7 +115,7 @@ docker compose -f docker-compose.dev.yml exec redis redis-cli -a signara
 | `P1001: Can't reach database`      | is Postgres running? `pg_isready`; check `.env` DATABASE_URL                                    |
 | `PrismaClientInitializationError`  | `npm run db:generate`                                                                           |
 | Upload 400 "Unsupported file type" | the client set a generic `application/octet-stream`; set `Content-Type` from the file extension |
-| 403 "No active tenant"             | user has no ACTIVE/TRIAL membership — seed the demo org or invite yourself                      |
+| 403 "No active tenant"             | user has no ACTIVE/TRIAL membership — create one via `POST /api/v1/organizations` (the dashboard shows the create-org card on first login) or ask an org owner to invite you |
 | 401 on /auth/me                    | missing/invalid IdP token — run the OIDC flow or refresh                                        |
 
 See [AdministrationGuide.md](AdministrationGuide.md) for tenant/admin topics and
