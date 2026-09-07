@@ -8,7 +8,29 @@
     "build": "NODE_ENV=production next build",
     "start": "next start -p 3000",
     "lint": "next lint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "jest --passWithNoTests"
+  },
+  "jest": {
+    "moduleFileExtensions": ["js", "json", "ts", "tsx"],
+    "rootDir": "src",
+    "testRegex": ".*\\.spec\\.tsx?$",
+    "transform": {
+      "^.+\\.(t|j)sx?$": [
+        "ts-jest",
+        {
+          "tsconfig": {
+            "jsx": "react-jsx",
+            "module": "commonjs",
+            "moduleResolution": "node",
+            "esModuleInterop": true
+          }
+        }
+      ]
+    },
+    "moduleNameMapper": {
+      "^@/(.*)$": "<rootDir>/$1"
+    }
   },
   "dependencies": {
     "next": "^14.2.15",
@@ -17,9 +39,12 @@
     "lucide-react": "^0.446.0"
   },
   "devDependencies": {
+    "@types/jest": "^29.5.12",
     "@types/node": "^20.16.10",
     "@types/react": "^18.3.10",
     "@types/react-dom": "^18.3.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.2.5",
     "autoprefixer": "^10.4.20",
     "eslint": "^8.57.1",
     "eslint-config-next": "^14.2.15",
