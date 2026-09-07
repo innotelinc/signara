@@ -50,6 +50,18 @@ interface ClientContext {
   [key: string]: unknown;
 }
 
+/**
+ * Fixed public token behind the landing page's "Try a demo signing room"
+ * link (/sign/demo). The first request provisions an idempotent demo
+ * session (its own org + document + signer) so the room works for anyone,
+ * logged in or not, without a tenant or an account. Once the demo is
+ * signed/expired the next visit resets it with a fresh document.
+ */
+const DEMO_TOKEN = 'demo';
+const DEMO_ORG_SLUG = 'signara-demo';
+const DEMO_DOC_TITLE = 'Signara Demo Agreement';
+const DEMO_SIGNER_EMAIL = 'demo@signara.local';
+
 @Injectable()
 export class SignaturesService {
   constructor(
@@ -210,6 +222,21 @@ export class SignaturesService {
    * The response only contains what that signer may see.
    */
   async publicSession(token: string, ctx: ClientContext) {
+    if (token === DEMO_TOKEN) {
+      const current = await this.prisma.signer.findUnique({
+        where: { token },
+        include: { request: { select: { status: true } } },
+      });
+      const active =
+        current &&
+        ['AWAITING_SIGNATURE', 'IN_PROGRESS'].includes(current.request.status) &&
+        current.status !== SignerStatus.DECLINED &&
+        current.status !== SignerStatus.EXPIRED;
+      if (!active) {
+        await this.ensureDemoSession();
+      }
+    }
+
     const signer = await this.prisma.signer.findUnique({
       where: { token },
       include: {
@@ -615,6 +642,98 @@ export class SignaturesService {
       })),
       statement: this.buildComplianceStatement(request.events),
     };
+  }
+
+  /** Creates (or resets) the always-on demo signing session behind /sign/demo. */
+  private async ensureDemoSession(): Promise<void> {
+    const org = await this.prisma.organization.upsert({
+      where: { slug: DEMO_ORG_SLUG },
+      update: { status: 'ACTIVE' },
+      create: { name: 'Signara Demo', slug: DEMO_ORG_SLUG, status: 'ACTIVE' },
+    });
+
+    // Remove any previous demo artifacts (a completed demo resets on next
+    // visit). Deleting the document cascades its requests, signers, events.
+    await this.prisma.signer.deleteMany({ where: { token: DEMO_TOKEN } });
+    await this.prisma.document.deleteMany({
+      where: { organizationId: org.id, title: DEMO_DOC_TITLE },
+    });
+
+    const pdf = this.demoPdf();
+    const checksum = createHash('sha256').update(pdf).digest('hex');
+    const fileKey = `${org.id}/documents/signara-demo-agreement.pdf`;
+    await this.minio.put(fileKey, pdf, 'application/pdf', checksum);
+
+    const document = await this.prisma.document.create({
+      data: {
+        organizationId: org.id,
+        title: DEMO_DOC_TITLE,
+        description: 'A sample agreement used by the Signara demo signing room.',
+        fileName: 'signara-demo-agreement.pdf',
+        fileKey,
+        contentType: 'application/pdf',
+        sizeBytes: pdf.length,
+        checksumSha256: checksum,
+        status: DocumentStatus.DRAFT,
+      },
+    });
+
+    const request = await this.prisma.signingRequest.create({
+      data: {
+        organizationId: org.id,
+        documentId: document.id,
+        title: 'Signara Demo Agreement',
+        message:
+          'This is a self-serve demo. Sign it to see how Signara records the signature, timestamps it, and keeps an audit trail.',
+        status: DocumentStatus.AWAITING_SIGNATURE,
+        mode: SigningMode.PARALLEL,
+      },
+    });
+
+    await this.prisma.signer.create({
+      data: {
+        requestId: request.id,
+        email: DEMO_SIGNER_EMAIL,
+        name: 'Demo Signer',
+        role: SignerRole.SIGNER,
+        orderIndex: 0,
+        status: SignerStatus.INVITED,
+        token: DEMO_TOKEN,
+        authMethod: 'email',
+      },
+    });
+    await this.recordEvent(request.id, SignatureEventType.CREATED, null, {
+      createdBy: 'demo',
+    });
+  }
+
+  /** A tiny but valid single-page PDF describing the demo. */
+  private demoPdf(): Buffer {
+    const objects: Record<number, string> = {
+      1: '<< /Type /Catalog /Pages 2 0 R >>',
+      2: '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+      3: '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>',
+      5: '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+    };
+    const stream =
+      'BT /F1 18 Tf 72 730 Td (Signara Demo Agreement) Tj ET\n' +
+      'BT /F1 11 Tf 72 700 Td (This is a sample agreement for the Signara demo signing room.) Tj ET\n' +
+      'BT /F1 11 Tf 72 684 Td (Sign it to see how an electronic signature is recorded with a full audit trail.) Tj ET\n';
+    objects[4] = `<< /Length ${Buffer.byteLength(stream)} >>\nstream\n${stream}endstream`;
+
+    let out = '%PDF-1.4\n';
+    const offsets: number[] = [];
+    for (let i = 1; i <= 5; i++) {
+      offsets[i] = Buffer.byteLength(out);
+      out += `${i} 0 obj\n${objects[i]}\nendobj\n`;
+    }
+    const xrefPos = Buffer.byteLength(out);
+    out += 'xref\n0 6\n0000000000 65535 f \n';
+    for (let i = 1; i <= 5; i++) {
+      out += `${String(offsets[i]).padStart(10, '0')} 00000 n \n`;
+    }
+    out += `trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xrefPos}\n%%EOF\n`;
+    return Buffer.from(out, 'utf8');
   }
 
   // ------------------------------------------------------------ helpers ----
