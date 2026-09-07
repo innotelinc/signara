@@ -53,13 +53,22 @@ of building API and web locally. Add
 `--with-cerulean` to reconcile DNS, NGINX Proxy Manager hosts, and TLS through
 Cerulean. DNS uses the persisted public WAN IP; NPM uses the host LAN IP.
 
+The browser-facing entry points come from `.env`: `WEB_URL`/`APP_URL` (the web
+app), `API_URL`, and `AUTH_URL`. Presigned document URLs are signed against
+`S3_PUBLIC_ENDPOINT` (e.g. `https://storage.signara.innotel.us`, exposed on
+host port `9002` by `docker-compose.override.prod.yml`) so browsers can reach
+object storage instead of the internal `minio:9000` host. The API derives its
+CORS allowlist from `WEB_URL`/`APP_URL` — including the apex/parent domain of
+those hosts and `localhost:3000` for development — and only needs
+`CORS_ORIGINS` when an extra origin must be allowed.
+
 ### Operations
 
 | Task          | Command                                                                           |
 | ------------- | --------------------------------------------------------------------------------- |
 | View status   | `docker compose -f docker-compose.prod.yml ps`                                    |
 | API logs      | `docker compose -f docker-compose.prod.yml logs -f api`                           |
-| Upgrade       | `git pull && ./setup.sh --production`                                              |
+| Upgrade       | `git pull && ./setup.sh --production`                                             |
 | Backup        | `docker compose -f docker-compose.prod.yml exec backup /backup/backup.sh`         |
 | Restore       | `docker compose -f docker-compose.prod.yml exec backup /backup/restore.sh <file>` |
 | Stop services | `docker compose -f docker-compose.prod.yml down`                                  |
@@ -84,7 +93,7 @@ Cerulean is the recommended automation path. It owns the DNS record updates,
 NGINX Proxy Manager reconciliation, wildcard certificate issuance/renewal, and
 certificate attachment. DNS A records for Signara hosts always use the public
 WAN IPv4 address. NPM upstreams use the host LAN IPv4 address so NPM can reach
-the API, web, Authentik, and admin ports; Docker bridge addresses are rejected.
+the API, web, storage, Authentik, and admin ports; Docker bridge addresses are rejected.
 The two addresses are deliberately separate.
 
 Set these values in `.env`:
@@ -115,17 +124,22 @@ make cerulean:provision
 
 The checked-in map at `infra/cerulean/hosts.conf` provisions:
 
-| Hostname | DNS A record | NPM upstream |
-| --- | --- | --- |
-| `app.signara.innotel.us` | WAN IP | LAN IP `:3000` |
-| `api.signara.innotel.us` | WAN IP | LAN IP `:8000` |
-| `auth.signara.innotel.us` | WAN IP | LAN IP `:9100` |
-| `admin.signara.innotel.us` | WAN IP | LAN IP `:81` |
+| Hostname                     | DNS A record | NPM upstream   |
+| ---------------------------- | ------------ | -------------- |
+| `app.signara.innotel.us`     | WAN IP       | LAN IP `:3000` |
+| `api.signara.innotel.us`     | WAN IP       | LAN IP `:8000` |
+| `auth.signara.innotel.us`    | WAN IP       | LAN IP `:9100` |
+| `admin.signara.innotel.us`   | WAN IP       | LAN IP `:81`   |
+| `storage.signara.innotel.us` | WAN IP       | LAN IP `:9002` |
+
+`storage` backs the browser-facing presigned document URLs (`S3_PUBLIC_ENDPOINT`)
+served by MinIO on host port `9002`; it needs no WebSocket support, so its
+`hosts.conf` entry is flagged `no`.
 
 On every normal provisioning run, Cerulean redetects and validates the current
 public WAN IPv4, persists it as `CERULEAN_WAN_IP`, and uses it for DNS. Cerulean
 then registers or reuses the `innotel.us` zone, removes prior A/CNAME
-records at the four exact Signara hostnames, creates exactly one WAN A record
+records at the five exact Signara hostnames, creates exactly one WAN A record
 per host, creates or updates the NPM hosts with LAN upstreams, and issues or
 reuses the `*.signara.innotel.us` wildcard certificate. Unrelated records in
 `innotel.us` are never removed. Certificate renewal and NPM attachment remain
@@ -143,12 +157,13 @@ The automation at `infra/nginx/npm-proxy-hosts.py` creates or updates proxy
 hosts and can request the wildcard certificate. Run it directly or through
 `./setup.sh --with-nginx`.
 
-| Hostname                   | Backend                                              |
-| -------------------------- | ---------------------------------------------------- |
-| `app.signara.innotel.us`   | web `:3000`                                          |
-| `api.signara.innotel.us`   | api `:8000`                                          |
-| `auth.signara.innotel.us`  | Authentik host port `:9100` (container port `:9000`) |
-| `admin.signara.innotel.us` | NPM admin UI or administration app                   |
+| Hostname                     | Backend                                              |
+| ---------------------------- | ---------------------------------------------------- |
+| `app.signara.innotel.us`     | web `:3000`                                          |
+| `api.signara.innotel.us`     | api `:8000`                                          |
+| `auth.signara.innotel.us`    | Authentik host port `:9100` (container port `:9000`) |
+| `admin.signara.innotel.us`   | NPM admin UI or administration app                   |
+| `storage.signara.innotel.us` | MinIO host port `:9002` (container port `:9000`)     |
 
 ```bash
 export NPM_API_URL=http://<npm-host>:81
@@ -169,6 +184,7 @@ app.signara.innotel.us  A  <proxy-host-ip>
 api.signara.innotel.us  A  <proxy-host-ip>
 auth.signara.innotel.us A  <proxy-host-ip>
 admin.signara.innotel.us A  <proxy-host-ip>
+storage.signara.innotel.us A <proxy-host-ip>
 ```
 
 ## 4. Identity provider (Authentik)
