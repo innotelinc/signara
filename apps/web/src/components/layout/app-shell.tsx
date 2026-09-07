@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import {
   FileText,
   LayoutDashboard,
@@ -38,22 +38,27 @@ interface Me {
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [me, setMe] = useState<Me | null>(null);
+
   // Auto-collapse: below lg the sidebar is an off-canvas drawer (closed by
   // default, sliding out to the left). On lg+ it is a pinned rail that the
   // user can collapse with the chevron.
-  const [isDesktop, setIsDesktop] = useState<boolean>(() =>
-    typeof window !== 'undefined' ? window.matchMedia(DESKTOP_QUERY).matches : true,
+  //
+  // The media query is read through useSyncExternalStore so the server and
+  // the client's first (hydration) render agree — reading matchMedia in a
+  // useState initializer caused React hydration mismatches (#418/#423) on
+  // every authenticated page when the viewport disagreed with the SSR guess.
+  const subscribeMedia = (onChange: () => void) => {
+    const mq = window.matchMedia(DESKTOP_QUERY);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  };
+  const isDesktop = useSyncExternalStore(
+    subscribeMedia,
+    () => window.matchMedia(DESKTOP_QUERY).matches,
+    () => true, // server snapshot: match the SSR desktop layout, then correct on mount
   );
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
-
-  useEffect(() => {
-    const mq = window.matchMedia(DESKTOP_QUERY);
-    const sync = () => setIsDesktop(mq.matches);
-    sync();
-    mq.addEventListener('change', sync);
-    return () => mq.removeEventListener('change', sync);
-  }, []);
 
   // When the viewport crosses onto desktop, snap the drawer shut so the
   // pinned rail state is deterministic.
