@@ -301,8 +301,9 @@ services:
       - ./infra/monitoring/prometheus/rules.yml:/etc/prometheus/rules.yml:ro
       - promdata:/prometheus
     ports:
-      # Host 9091 (container 9090): shared :9090 is Sabnzbd (monarch media).
-      - '9091:9090'
+      # Host 9092 (container 9090): :9090 is Sabnzbd and :9091 Transmission
+      # (monarch media) — keep clear of both.
+      - '9092:9090'
     depends_on:
       - api
     healthcheck:
