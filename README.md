@@ -11,6 +11,7 @@ Multi-tenant by design. Runs on the battle-tested open-source stack of **Next.js
 PostgreSQL, Redis, MinIO, and Meilisearch**.
 
 [![CI](https://github.com/innotelinc/signara/actions/workflows/ci.yml/badge.svg)](https://github.com/innotelinc/signara/actions/workflows/ci.yml)
+[![Conformity](https://github.com/innotelinc/signara/actions/workflows/conform.yml/badge.svg)](https://github.com/innotelinc/signara/actions/workflows/conform.yml)
 [![Release](https://github.com/innotelinc/signara/actions/workflows/release.yml/badge.svg)](https://github.com/innotelinc/signara/actions/workflows/release.yml)
 [![Latest release](https://img.shields.io/github/v/release/innotelinc/signara?color=16a34a)](https://innotelinc.github.io/signara/releases)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-or-later-brightgreen.svg)](LICENSE)
