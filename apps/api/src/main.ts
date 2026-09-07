@@ -47,10 +47,9 @@ async function bootstrap() {
   );
 
   app.use(cookieParser());
-  const allowedOrigins = (config.get<string>('app.webUrl') ?? '')
-    .split(',')
-    .map((origin) => origin.trim())
-    .filter(Boolean);
+  // The web app is served from WEB_URL/APP_URL plus, typically, the apex of
+  // those hosts and localhost during development — see buildCorsOrigins().
+  const allowedOrigins = (config.get<string[]>('app.corsOrigins') ?? []).filter(Boolean);
   app.enableCors({
     origin: allowedOrigins.length ? allowedOrigins : false,
     credentials: true,
