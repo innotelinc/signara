@@ -199,6 +199,13 @@ Signara is the ecosystem's **DocumentOps** platform — document signing, agreem
 [**Innotel Platform Stack**](https://github.com/innotelinc/innotel-platform-stack) — the
 canonical single-responsibility architecture where Authentik owns identity, Infisical owns
 secrets, Cerulean owns trust, ONYX owns storage, Magnate owns revenue, NPM Edge owns the edge, and every other
-platform is a business function that consumes them. See
+platform is a 
+---
+
+## License
+
+Signara is licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later). See [LICENSE](LICENSE) for the full text.
+
+business function that consumes them. See
 [docs/stack.md](docs/stack.md) for this platform's owns/consumes boundaries and its
 Infisical secret setup.
