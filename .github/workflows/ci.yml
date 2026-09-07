@@ -44,6 +44,13 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      # The public signing room calls the API cross-origin, so the CORS
+      # allowlist must keep covering every origin the web app is served from
+      # (WEB_URL/APP_URL, their apex domain, and localhost). These specs fail
+      # if the allowlist is ever reduced back to a single hard-coded origin.
+      - name: CORS allowlist regression guard
+        run: npm run test -w @signara/api -- configuration.spec.ts
+
       - name: Unit tests
         run: npm run test
 

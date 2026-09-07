@@ -16,10 +16,26 @@ export interface StoredObject {
 export class MinioService implements OnModuleInit {
   private readonly logger = new Logger('Minio');
   private client!: Minio.Client;
+  /** Client against the public-facing endpoint, used for browser links. */
+  private publicClient?: Minio.Client;
 
   constructor(private readonly config: ConfigService) {
-    const endpointUrl = new URL(this.config.get<string>('s3.endpoint') ?? 'http://localhost:9000');
-    this.client = new Minio.Client({
+    this.client = this.buildClient(
+      this.config.get<string>('s3.endpoint') ?? 'http://localhost:9000',
+    );
+    // Presigned URLs signed against the internal endpoint (e.g. minio:9000)
+    // are unreachable from browsers, so when a public origin is configured the
+    // signing client is pointed at it instead. Bucket, credentials and region
+    // are identical — only the host differs (usually via the reverse proxy).
+    const publicEndpoint = this.config.get<string>('s3.publicEndpoint');
+    if (publicEndpoint && publicEndpoint !== (this.config.get<string>('s3.endpoint') ?? '')) {
+      this.publicClient = this.buildClient(publicEndpoint);
+    }
+  }
+
+  private buildClient(endpoint: string): Minio.Client {
+    const endpointUrl = new URL(endpoint);
+    return new Minio.Client({
       endPoint: endpointUrl.hostname,
       port: endpointUrl.port ? Number(endpointUrl.port) : endpointUrl.protocol === 'https:' ? 443 : 80,
       useSSL: endpointUrl.protocol === 'https:',
@@ -61,7 +77,11 @@ export class MinioService implements OnModuleInit {
   }
 
   async getPresignedUrl(key: string, expiresSeconds = 900): Promise<string> {
-    return this.client.presignedGetObject(this.bucket, key, expiresSeconds);
+    return (this.publicClient ?? this.client).presignedGetObject(
+      this.bucket,
+      key,
+      expiresSeconds,
+    );
   }
 
   async delete(key: string): Promise<void> {

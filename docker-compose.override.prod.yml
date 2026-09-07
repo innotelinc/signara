@@ -23,6 +23,13 @@ services:
       retries: 10
       start_period: 30s
 
+  # Public object-storage endpoint used by browser-facing presigned document
+  # URLs (S3_PUBLIC_ENDPOINT, e.g. https://storage.signara.innotel.us). Host
+  # port 9002 avoids the host 9000 taken by Cerulean's Authentik.
+  minio:
+    ports:
+      - '0.0.0.0:9002:9000'
+
   # Observability + backup are opt-in (they are otherwise in the default set
   # and cost ~2 GB on modest hosts). Start with:
   #   docker compose -f docker-compose.prod.yml -f docker-compose.override.prod.yml \
