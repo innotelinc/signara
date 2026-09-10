@@ -149,7 +149,7 @@ signara/
 
 ```bash
 npm install
-make db:generate && make db:migrate && make db:seed
+make db-generate && make db-migrate && make db-seed
 make dev     # API on :8000, web on :3000, with the rest of the stack via `make up`
 ```
 

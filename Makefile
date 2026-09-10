@@ -6,12 +6,12 @@
 .DEFAULT_GOAL := help
 SHELL := /bin/bash
 
-.PHONY: help install dev dev:api dev:web build lint test typecheck \
-        db:generate db:migrate db:seed db:studio \
-        up up:dev up:prod down logs ps \
-        backup backup:now restore \
-        nginx:hosts nginx:cert \
-        cerulean:provision check:commits \
+.PHONY: help install dev dev-api dev-web build lint test typecheck \
+        db-generate db-migrate db-seed db-studio \
+        up up-dev up-prod down logs ps \
+        backup backup-now restore \
+        nginx-hosts nginx-cert \
+        cerulean-provision check-commits \
         release docs
 
 help: ## Show this help message
@@ -24,13 +24,13 @@ help: ## Show this help message
 install: ## Install all workspace dependencies
 	npm install
 
-dev: ## Run API + web in watch mode (requires local Postgres/Redis/MinIO, or use `make up:dev`)
+dev: ## Run API + web in watch mode (requires local Postgres/Redis/MinIO, or use `make up-dev`)
 	npm run dev
 
-dev:api: ## Run only the API in watch mode
+dev-api: ## Run only the API in watch mode
 	npm run dev -w @signara/api
 
-dev:web: ## Run only the web app in watch mode
+dev-web: ## Run only the web app in watch mode
 	npm run dev -w @signara/web
 
 build: ## Build all workspaces
@@ -47,16 +47,16 @@ typecheck: ## Typecheck all workspaces
 
 ## ---- Database ------------------------------------------------------------
 
-db:generate: ## Generate Prisma client from schema
+db-generate: ## Generate Prisma client from schema
 	npm run db:generate -w @signara/database
 
-db:migrate: ## Apply pending Prisma migrations
+db-migrate: ## Apply pending Prisma migrations
 	npm run db:migrate -w @signara/database
 
-db:seed: ## Seed the database with bootstrap data
+db-seed: ## Seed the database with bootstrap data
 	npm run db:seed -w @signara/database
 
-db:studio: ## Open Prisma Studio against the database
+db-studio: ## Open Prisma Studio against the database
 	npm run db:studio -w @signara/database
 
 ## ---- Docker Compose ------------------------------------------------------
@@ -64,9 +64,9 @@ db:studio: ## Open Prisma Studio against the database
 up: ## Start the full development stack (docker-compose.dev.yml)
 	docker compose -f docker-compose.dev.yml up -d --build
 
-up:dev: up ## Alias for `make up`
+up-dev: up ## Alias for `make up`
 
-up:prod: ## Start the production stack (docker-compose.prod.yml)
+up-prod: ## Start the production stack (docker-compose.prod.yml)
 	docker compose -f docker-compose.prod.yml up -d --build
 
 down: ## Stop and remove all services (keeps volumes)
@@ -83,23 +83,23 @@ ps: ## List service status
 backup: ## Run the backup job (Postgres + MinIO) against the production stack
 	docker compose -f docker-compose.prod.yml exec backup /backup/backup.sh
 
-backup:now: backup ## Alias for `make backup`
+backup-now: backup ## Alias for `make backup`
 
 restore: ## Restore the latest backup (interactive)
 	docker compose -f docker-compose.prod.yml exec backup /backup/restore.sh
 
 ## ---- NGINX Proxy Manager automation --------------------------------------
 
-nginx:hosts: ## Create/update the four proxy hosts via NGINX Proxy Manager API
+nginx-hosts: ## Create/update the four proxy hosts via NGINX Proxy Manager API
 	python3 infra/nginx/npm-proxy-hosts.py --apply
 
-nginx:cert: ## Request the wildcard Let's Encrypt certificate via NPM (legacy path)
+nginx-cert: ## Request the wildcard Let's Encrypt certificate via NPM (legacy path)
 	python3 infra/nginx/npm-proxy-hosts.py --cert-only
 
-cerulean:provision: ## Reconcile Signara DNS, NPM hosts, and TLS through Cerulean
+cerulean-provision: ## Reconcile Signara DNS, NPM hosts, and TLS through Cerulean
 	python3 infra/cerulean/provision.py --dotenv .env
 
-check:commits: ## Reject generated attribution text in reachable commit messages
+check-commits: ## Reject generated attribution text in reachable commit messages
 	bash scripts/check-commit-messages.sh
 
 ## ---- Release -------------------------------------------------------------
