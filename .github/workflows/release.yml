@@ -12,7 +12,7 @@ jobs:
     name: Create GitHub Release with notes
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -26,14 +26,14 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Ensure SBOM artifacts exist
-        uses: anchore/sbom-action@v0.17.2
+        uses: anchore/sbom-action@v0.24.2
         with:
           path: .
           format: spdx-json
           artifact-name: signara-sbom.spdx.json
 
       - name: Publish release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.ref_name }}
           generate_release_notes: true
