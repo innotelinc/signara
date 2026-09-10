@@ -123,7 +123,7 @@ Apply it during setup or independently:
 ```bash
 ./setup.sh --production --with-cerulean
 # or
-make cerulean:provision
+make cerulean-provision
 ```
 
 The checked-in map at `infra/cerulean/hosts.conf` provisions:
