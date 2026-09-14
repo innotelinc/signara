@@ -56,7 +56,7 @@ jobs:
       - name: Build image
         run: docker build -f apps/${{ matrix.image }}/Dockerfile -t signara-${{ matrix.image }}:scan .
       - name: Scan with Grype
-        uses: anchore/scan-action@v3
+        uses: anchore/scan-action@v7
         with:
           image: signara-${{ matrix.image }}:scan
           fail-build: false
