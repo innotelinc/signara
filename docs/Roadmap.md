@@ -18,6 +18,7 @@
 | **Storage** | MinIO (bundled) | `signara-minio-1` healthy; `storage/minio.service.ts` |
 | **Onyx object store** | Running, **still not usable by Signara** | `onyx-platform-onyx-objectstore-1` on `:2090`, but `services/objectstore/http.go` says *"SigV4 signing verification lands with the S3 gateway milestone"* — HTTP Basic only, so no SDK and no presigned URLs |
 | **Identity** | Authentik-native, OIDC-only | `auth` module exposes `login`/`callback`/`refresh`/`logout`/`me` — **no password endpoint exists** (the posture the rest of the estate was moved to today) |
+| **Sign-in test** | Passing | `scripts/verify-sso.py` — member signs in and `/auth/me` names them; an outsider is refused by the application's group binding; no password endpoint |
 
 **One sentence:** the cutover already happened — Signara serves the public URL — so
 the remaining work is not "move off OpenSign", it is "finish Signara": close the
@@ -49,12 +50,16 @@ Each workstream has an exit criterion that can be checked, not judged.
 Authentik-native identity is in place; what is missing is the estate-level
 proof and the tenant model's edges.
 
-- [ ] `scripts/verify-sso.py` in the signara repo, modelled on the three zone
-  tests committed on 2026-09-15 (cerulean / capstone / monarch): create a
-  throwaway Authentik identity, drive a real authorization-code flow against
-  `sign.innotel.us` **and** the `app.`/`api.` aliases, assert the session opens
-  the app, assert an identity outside the required group is refused, delete it
-  after. This is the one piece of the posture that currently has no test.
+- [x] `scripts/verify-sso.py` in the signara repo (**done 2026-09-15**),
+  modelled on the three zone tests committed the same day (cerulean / capstone /
+  monarch). It drives the API's real flow — `GET /api/v1/auth/login` → Authentik
+  → `GET /api/v1/auth/callback` → refresh cookie → bearer → `/api/v1/auth/me` —
+  asserts the callback bound the flow with `signara_oidc_state` and issued both
+  auth cookies, asserts an identity outside the bound `Signara` group is refused
+  at authorization, and asserts there is no password endpoint. Exit codes 0/1/2.
+  The token it needs to mint identities comes from Cerulean's `.env` (the trust
+  layer) unless `AUTHENTIK_BOOTSTRAP_TOKEN` is set, overridable with
+  `AUTHENTIK_ENV_FILE`.
 - [ ] Confirm there is no break-glass password path in the web app (the API has
   none — check the Next.js auth routes route through the API only).
 - [ ] Role model: `Organization → Workspace → Team` exists in Prisma
@@ -170,8 +175,8 @@ stale references.
 
 1. **Timebox the legacy-data recovery (§6)** — a day of looking, not a project.
    Everything in P3 depends on the answer.
-2. **Write `signara/scripts/verify-sso.py`** and run it against `sign.innotel.us`
-   plus the aliases — this closes the last untested zone and is cheap.
+2. ~~Write `signara/scripts/verify-sso.py`~~ — **done 2026-09-15**; it passes
+   against the live deployment, which closes the last untested zone.
 3. **File the W2 parity checklist as issues**, one per row, each with an
    explicit ship/out-of-scope decision.
 4. **Open the Onyx SigV4 work item** and land it; until then treat Track B
