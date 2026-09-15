@@ -100,7 +100,9 @@ jobs:
           --health-timeout 5s
           --health-retries 10
       minio:
-        image: minio/minio:RELEASE.2024-09-13T20-26-02Z
+        # MinIO retired its Docker Hub images (pull access denied), so this has
+        # to come from MinIO's own registry — same release, same tag.
+        image: quay.io/minio/minio:RELEASE.2024-09-13T20-26-02Z
         command: server /data
         env:
           MINIO_ROOT_USER: signara

@@ -147,7 +147,9 @@ services:
 
   # --------------------------------------------------------------- minio ---
   minio:
-    image: minio/minio:RELEASE.2024-09-13T20-26-02Z
+    # MinIO retired its Docker Hub images (pull access denied) — use its own
+    # registry; the RELEASE tag is identical.
+    image: quay.io/minio/minio:RELEASE.2024-09-13T20-26-02Z
     container_name: signara-minio
     restart: unless-stopped
     command: server /data --console-address ":9001"

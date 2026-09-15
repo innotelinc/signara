@@ -156,7 +156,10 @@ services:
     logging: *logging-default
 
   minio:
-    image: minio/minio:RELEASE.2024-09-13T20-26-02Z
+    # MinIO retired its Docker Hub images (pull access denied), so a fresh host
+    # cannot pull this from docker.io — MinIO's own registry serves the same
+    # release. Cached hosts keep working either way.
+    image: quay.io/minio/minio:RELEASE.2024-09-13T20-26-02Z
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
