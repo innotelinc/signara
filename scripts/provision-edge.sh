@@ -5,14 +5,14 @@
 #      and https://api.signara.<base> -> http://192.168.1.46:8000, each with a
 #      single-name Let's Encrypt cert (HTTP-01; NPM wildcard issuance is broken).
 set -euo pipefail
-CERULEAN_ENV="${CERULEAN_ENV:-/usr/src/projects/complete/cerulean-dns-platform/.env}"
+CERULEAN_ENV="${CERULEAN_ENV:-/usr/src/projects/complete/1-primary/cerulean/.env}"
 [ -f "$CERULEAN_ENV" ] && set -a && . "$CERULEAN_ENV" && set +a
 
 BIND_SERVER="${BIND_SERVER:-192.168.1.80}"
 BIND_TSIG_NAME="${BIND_TSIG_NAME:-cerulean}"
 FORWARD_HOST="${FORWARD_HOST:-192.168.1.46}"
 BASE_DOMAIN="${BASE_DOMAIN:-innotel.us}"
-NPM_API_URL="${NPM_API_URL:-http://192.168.1.71:81}"
+NPM_API_URL="${NPM_API_URL:-http://192.168.1.46:81}"
 ACME_EMAIL="${ACME_EMAIL:-admin@innotel.us}"
 DOMAINS=(app.signara.${BASE_DOMAIN} api.signara.${BASE_DOMAIN})
 

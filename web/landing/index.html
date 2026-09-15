@@ -388,7 +388,7 @@
     <section id="stack">
       <div class="wrap">
         <h2>The Document layer of the stack<span class="accent">.</span></h2>
-        <p class="section-sub">Signara consumes Authentik (identity), Cerulean (trust), Infisical (secrets) and Magnate (revenue).</p>
+        <p class="section-sub">Signara consumes Authentik (identity), Cerulean (trust), Cerulean Vault (secrets) and Magnate (revenue).</p>
         <div class="split">
           <div>
             <div class="grid" style="gap:14px">
@@ -397,7 +397,7 @@
           </div>
           <pre class="terminal"><span class="cmt"># one-shot setup: stack + SSO + secrets</span>
 $ <span class="p">./setup.sh</span>
-<span class="ok">>> [infisical] provisioning secrets into Infisical (SecretOps)</span>
+<span class="ok">>> [vault] provisioning secrets into Cerulean Vault (SecretOps)</span>
 <span class="ok">>> [authentik] SSO provider provisioned → auth.signara.innotel.us</span>
 $ <span class="p">curl</span> https://api.signara.innotel.us/api/status
 <span class="ok">{"status":"ok","signing":"ready","audit":"writable"}</span></pre>

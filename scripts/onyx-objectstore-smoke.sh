@@ -3,7 +3,7 @@
 #
 # NOTE: onyx-objectstore v0.1 authenticates with HTTP Basic auth
 # (S3_ACCESS_KEY/S3_SECRET_KEY) — AWS SigV4/presigned URLs land with the
-# S3 gateway milestone (services/objectstore/http.go in onyx-oss-platform).
+# S3 gateway milestone (services/objectstore/http.go in the onyx repo).
 # MinIO/S3 SDKs therefore cannot be used against it yet; plain REST calls
 # like these are the correct v0.1 verification.
 # (scripts/onyx-s3-test.mjs is the forward probe for that milestone.)
