@@ -44,3 +44,8 @@ test-results/
 # Python
 __pycache__/
 *.py[cod]
+
+# Cerulean Vault token copies (data/vault/token/<product>.token) — live credentials.
+data/vault/token/
+data/vault/init/
+data/vault/file/
