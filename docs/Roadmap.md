@@ -16,7 +16,7 @@
 | **Sign Platform (OpenSign fork)** | **Gone, not merely retired** | `192.168.1.11` answers no ICMP and nothing on `:3000`, `:8080`, `:27017`; no `sign-platform*` container or volume exists on this host |
 | **Legacy data** | **Presumed lost — unverified** | The backup script lived only on `.11` (`/usr/local/bin/sign-platform-backup.sh`), was never committed to the repo, and no archive exists on this host. §6 |
 | **Storage** | MinIO (bundled) | `signara-minio-1` healthy; `storage/minio.service.ts` |
-| **Onyx object store** | Running, **still not usable by Signara** | `onyx-platform-onyx-objectstore-1` on `:2090`, but `services/objectstore/http.go` says *"SigV4 signing verification lands with the S3 gateway milestone"* — HTTP Basic only, so no SDK and no presigned URLs |
+| **Onyx object store** | **Speaks SigV4 — the contract test is green against it** | `services/objectstore/sigv4.go` verifies `AWS4-HMAC-SHA256` header auth *and* presigned URLs; `sigv4_test.go` pins the key derivation to the published AWS vector. `storage.contract.spec.ts` runs put → stat → presign → fetch → delete through minio-js against a standalone build: **6/6** (2026-09-15). HTTP Basic is still accepted so an existing deployment survives the upgrade |
 | **Identity** | Authentik-native, OIDC-only | `auth` module exposes `login`/`callback`/`refresh`/`logout`/`me` — **no password endpoint exists** (the posture the rest of the estate was moved to today) |
 | **Sign-in test** | Passing | `scripts/verify-sso.py` — member signs in and `/auth/me` names them; an outsider is refused by the application's group binding; no password endpoint |
 
@@ -78,7 +78,11 @@ is written down in `docs/Security.md`.
 The old platform is gone, so parity is now about **not losing a capability a
 user may still expect**, not about running two systems in parallel. The
 checklist below is a starting inventory taken from the API surface on
-2026-09-15; turning each row into a verified GitHub issue is the first task.
+2026-09-15. **Filed 2026-09-15 as issues #81–#92** (one per gap and per
+"decide" row; the shipped rows have none). The issues carry the product
+statements — the bodies name no internal host or address, because the repository
+is public — so this table stays the internal view and the tracker is the working
+one.
 
 | Capability | Evidence in Signara today | Gap to close |
 |---|---|---|
@@ -101,31 +105,46 @@ checklist below is a starting inventory taken from the API surface on
 | Admin/ops view | `admin`: orgs, users, status, `metrics` | — |
 
 **Exit:** every row is either **shipped**, **decided out of scope with a reason**,
-or **scheduled** — nothing is "unknown".
+or **scheduled** — nothing is "unknown". Status: 6 rows shipped (upload,
+versions, download; send for signature; guest signing; audit trail; admin/ops),
+**12 filed as issues #81–#92** — 8 gaps and 4 decisions (bulk send, in-person
+signing, cloud-storage import, SMS/WhatsApp), plus the billing question in §8.
 
 ### W3 — Storage onto Onyx (P2, the one hard blocker)
-Onyx v0.1's object store authenticates with HTTP Basic only; AWS SigV4 and
-presigned URLs are deferred to its S3-gateway milestone
-(`4-social/onyx/services/objectstore/http.go`). Signara's storage service is a
-MinIO S3 client, so it **cannot** talk to Onyx until that lands.
+Onyx v0.1's object store authenticated with HTTP Basic only, which no S3 SDK
+speaks — so Signara's MinIO client could not talk to it, and presigned URLs,
+which is how a browser fetches a document without the API proxying every byte,
+were impossible. Both tracks of this workstream are now landed:
 
-Two tracks, run in parallel:
+- **Track A (unblock) — done.** `4-social/onyx/services/objectstore/sigv4.go`
+  implements AWS Signature Version 4 from the specification: the
+  `AWS4-HMAC-SHA256` header form every SDK produces, and the presigned-URL form
+  in the query string. It verifies the canonical request, the payload hash
+  (`x-amz-content-sha256`, restoring the body for the handler afterwards),
+  enforces a 15-minute clock skew and the `X-Amz-Expires` window, and refuses a
+  request whose declared `SignedHeaders` are not all present. HTTP Basic is
+  kept, so an existing deployment survives the upgrade — but a request that
+  *claims* SigV4 never falls back to it, which `sigv4_test.go` asserts. The
+  signing-key derivation is pinned to the worked example published by AWS, so a
+  failure names the primitive rather than the request.
+  Landed upstream in Onyx, so this unblocks every S3-shaped consumer in the
+  estate, not just Signara.
+- **Track B (de-risked) — done.** The driver is a supported `S3_*` profile
+  (endpoint, public endpoint, keys, bucket, path-style, region), and
+  `storage.contract.spec.ts` is the contract test: upload → stat (incl. the
+  checksum metadata) → presign → *fetch the presigned URL* → read back → delete,
+  run through minio-js so it exercises the real client rather than a stub. It is
+  `S3_CONTRACT=1`-gated, so `npm test` stays hermetic.
 
-- **Track A (unblock):** land SigV4 request verification + presigned URL
-  generation in Onyx's objectstore. This is upstream work in the Onyx repo, not
-  in Signara, and it unblocks every S3-shaped consumer in the estate, not just
-  this one. It is the single highest-leverage item on this roadmap.
-- **Track B (de-risk while A is open):** make the storage driver a **first-class
-  configurable profile** in Signara rather than a hardcoded `http://minio:9000`.
-  Today the compose hardcodes MinIO and an override file is needed to point
-  elsewhere. Ship `S3_*` as documented, supported configuration (endpoint,
-  public endpoint, keys, bucket, path-style, region) with a **contract test**
-  that runs the upload → presign → download → delete round trip against whatever
-  endpoint is configured. Then the Onyx cutover is a config change plus a data
-  copy, not a code change.
+Two gaps Track A exposed in Onyx, both fixed in the same pass: the endpoint
+answered `Method Not Allowed` for `HEAD` bucket/object (every SDK probes a bucket
+before writing), and it dropped `x-amz-meta-*` headers, so a client could not
+check a download against the hash it uploaded.
 
-**Exit:** the round-trip contract test is green against Onyx, `S3_ENDPOINT`
-points at it in production, and bundled MinIO is dev-only/removed.
+**Exit:** the round-trip contract test is green against Onyx **(met 2026-09-15 —
+6/6 through minio-js against a standalone `onyx-objectstore`)**. What remains is
+the deployment half: point `S3_ENDPOINT` at Onyx in production, copy the existing
+objects across, and demote bundled MinIO to dev-only.
 
 ### W4 — Legacy history (P3, re-scoped)
 See §6. The ETL described in `CONVERGENCE.md` v1 (Mongo → Postgres, files →
@@ -134,6 +153,10 @@ Onyx `legacy/sign-platform/`) is **only worth writing if the source exists**.
 **Exit:** either the ETL runs and counts reconcile and a pilot tenant reads its
 own history inside Signara, **or** a recorded decision says the history is
 written off, with the recovery attempt and its result documented.
+
+**Met 2026-09-15 — written off.** The recovery attempt is recorded below, with
+the sources checked and what each returned. No ETL will be written; see §6 for
+what is owed to users in place of the history.
 
 ### W5 — Edge, delivery and certificates (P4 — mostly done)
 - [x] `sign.innotel.us` serves Signara; `CORS_ORIGINS` includes it.
@@ -166,22 +189,30 @@ stale references.
 |---|---|---|---|
 | **P0 — Freeze legacy** | sign-platform stable fallback + backups | **Moot** — the host is gone; nothing to freeze | replaced by §6 recovery attempt |
 | **P1 — Parity** | W1 + W2 | **In progress** | every parity row shipped/decided/scheduled; verify script green |
-| **P2 — Onyx** | W3 | **Blocked on Onyx SigV4** | round-trip contract test green against Onyx in prod |
+| **P2 — Onyx** | W3 | **Unblocked** — SigV4 landed, contract green; remaining work is the prod cutover | round-trip contract test green against Onyx in prod |
 | **P3 — Migration** | W4 | **Conditional on §6** | counts reconcile *or* a recorded write-off |
 | **P4 — Cutover** | W5 | **Done** (2026-09-15) | signers sign on Signara at `sign.innotel.us` |
 | **P5 — Retire legacy** | archive the `sign` repo, drop dead DNS/proxy hosts, final doc pass | **Not started** | nothing in the estate refers to OpenSign except history |
 
 ## 5. Next actions (ordered)
 
-1. **Timebox the legacy-data recovery (§6)** — a day of looking, not a project.
-   Everything in P3 depends on the answer.
+1. ~~Timebox the legacy-data recovery (§6)~~ — **done 2026-09-15: written off.**
+   The sources checked and their results are in §6; P3's ETL is cancelled rather
+   than pending.
 2. ~~Write `signara/scripts/verify-sso.py`~~ — **done 2026-09-15**; it passes
    against the live deployment, which closes the last untested zone.
-3. **File the W2 parity checklist as issues**, one per row, each with an
-   explicit ship/out-of-scope decision.
-4. **Open the Onyx SigV4 work item** and land it; until then treat Track B
-   (configurable storage profile + contract test) as the deliverable.
+3. ~~File the W2 parity checklist as issues~~ — **done 2026-09-15**: issues
+   #81–#92. The four decisions (bulk send, in-person signing, cloud-storage
+   import, SMS/WhatsApp) are now `question` issues that need an owner's answer,
+   not a default.
+4. ~~Open the Onyx SigV4 work item and land it~~ — **done 2026-09-15**
+   (`services/objectstore/sigv4.go` + `storage.contract.spec.ts`, 6/6 green).
+   What is left is the cutover itself: `S3_ENDPOINT` → Onyx in production, copy
+   the objects, demote MinIO to dev-only.
 5. **Make the backup target a different host** and run one restore drill.
+6. **Cut storage over to Onyx** (W3's remaining half): point `S3_ENDPOINT` at
+   it, copy the objects, verify against `DocumentVersion.checksumSha256`, then
+   reduce bundled MinIO to a dev-only profile.
 
 ## 6. The legacy data question (do this first)
 
@@ -203,17 +234,42 @@ Decision tree:
 | An archive exists elsewhere (another host, cloud bucket, an operator's laptop) | P3 with the ETL written against the archive; verification report against `DocumentHash` |
 | Neither | **Record the write-off.** Signara starts clean; offer a documented import path (an operator can still hand over a PDF) and make sure nobody promises "your old envelopes are in here" |
 
-The recovery attempt, whatever it finds, gets written into this document rather
-than living in someone's memory — the reason this is a risk at all is that the
-last migration's durability depended on an unversioned script on a single box.
+### The recovery attempt — performed 2026-09-15, found nothing ###
+
+The timebox was one pass of looking, and it is spent. What was checked:
+
+| Source | Result |
+|---|---|
+| `192.168.1.11` | No ICMP; `:3000`, `:8080`, `:27017` closed; **`:22` closed too**, so it is not a reachable host in any state, only an address |
+| `mongodump` archives / `opensign-files` tarballs on this host | None. A filesystem-wide search for `*.tar.gz|*.tgz|*.bson|*.dump|*.archive` matching sign/opensign/mongo found nothing of ours |
+| The backup script | `sign-platform-backup.sh` appears in the `sign` repo **only inside the convergence documents** describing it, never as a committed file — so its destination was never recorded anywhere a reader could find it |
+| A network share or NAS | No NFS/CIFS/SMB mount on this host |
+| Retention | The documented retention was **14 days** from the first verified run on 2026-09-09, so even a surviving archive would have aged out around 2026-09-23 |
+
+**Decision: written off.** The P3 ETL is therefore not written — an ETL with no
+source is a liability, not progress. If an operator turns up a copy later, this
+table is the place to record it and P3 reopens.
+
+What Signara owes users instead, so the write-off is not silent:
+
+1. Say it in the launch note: **documents created on the previous platform are
+   not in Signara.** No wording that implies otherwise.
+2. Keep a documented way to bring a finished document in by hand, so an operator
+   holding a PDF can still attach it to a record.
+
+The reason this is a risk at all is that the last migration's durability depended
+on an unversioned script on a single box. The remediation is §W6: a backup target
+that is a different host, and a restore drill that has actually been run.
 
 ## 7. Risks
 
 - **A second silent data loss.** Signara's own backups have not been proven
   restorable and are not obviously off-host (§W6). Fix before anything else
   changes.
-- **Onyx's SigV4 milestone slips.** Track B keeps Signara shippable meanwhile;
-  do not let the storage question block W1/W2.
+- ~~**Onyx's SigV4 milestone slips.**~~ Cleared: SigV4 landed and the contract
+  test passes against it. The residual risk is the **data copy** — moving
+  existing objects into Onyx and proving the count, which is a migration chore
+  rather than a blocker.
 - **Parity by assumption.** The checklist above is an inventory of API surface,
   not of user expectations. Rows marked "decide" need a decision from the owner,
   not a default.
@@ -225,7 +281,8 @@ last migration's durability depended on an unversioned script on a single box.
 
 ## 8. Decisions needed
 
-1. **Legacy data:** timebox the recovery, or write it off now? (§6)
+1. ~~**Legacy data:** timebox the recovery, or write it off now?~~ — **settled
+   2026-09-15: written off** (§6), after the recovery pass found nothing.
 2. **Parity rows marked "decide"** — bulk send, in-person signing, cloud-storage
    imports, SMS/WhatsApp, i18n: ship or explicitly out of scope?
 3. **Billing:** Signara's module as a Magnate client, or removed?
