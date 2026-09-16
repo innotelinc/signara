@@ -46,12 +46,55 @@ export class MinioService implements OnModuleInit {
     });
   }
 
+  /**
+   * What to say about a storage failure.
+   *
+   * The S3 SDKs reject with plain objects, not `Error`s, so `error.message` is
+   * often empty — which produced a startup error reading "Could not reach the
+   * object store: ." and named nothing. `code` is where the status lands.
+   */
+  private static describe(error: unknown): string {
+    const any = error as { message?: string; code?: string; name?: string } | undefined;
+    return any?.message || any?.code || any?.name || String(error);
+  }
+
   async onModuleInit(): Promise<void> {
     const bucket = this.config.get<string>('s3.bucket') ?? 'signara-documents';
-    const exists = await this.client.bucketExists(bucket).catch(() => false);
-    if (!exists) {
-      await this.client.makeBucket(bucket);
+    const endpoint = this.config.get<string>('s3.endpoint') ?? '';
+
+    let exists = false;
+    try {
+      exists = await this.client.bucketExists(bucket);
+    } catch (error) {
+      // `bucketExists` answering "no" and failing outright are different faults,
+      // and the second one used to be swallowed into the first: the catch made a
+      // connection or credential problem look like a missing bucket, so the next
+      // call was a `makeBucket` that could only fail too — and the operator saw
+      // that second error, which named the wrong cause.
+      throw new Error(
+        `Cannot reach the object store at ${endpoint} for bucket '${bucket}': ` +
+          `${MinioService.describe(error)}. ` +
+          'Check S3_ENDPOINT / S3_ACCESS_KEY / S3_SECRET_KEY — an endpoint that only ' +
+          'accepts a different signing scheme (or HTTP Basic) rejects SigV4 requests here.',
+      );
+    }
+
+    if (exists) return;
+
+    // Creating the bucket is a convenience for a fresh local MinIO, not a
+    // requirement of the protocol: an endpoint may refuse it (a gateway that
+    // only serves pre-provisioned buckets, or a store that implements the S3
+    // data plane but not the bucket API). Say which bucket is missing and how
+    // to create it rather than crashing on an opaque `AccessDenied`.
+    try {
+      await this.client.makeBucket(bucket, this.config.get<string>('s3.region') ?? '');
       this.logger.log(`Created bucket ${bucket}`);
+    } catch (error) {
+      throw new Error(
+        `Bucket '${bucket}' does not exist at ${endpoint} and creating it failed: ` +
+          `${MinioService.describe(error)}. Create it with your storage's own tooling ` +
+          '(e.g. `mc mb`), or point S3_BUCKET at an existing bucket.',
+      );
     }
   }
 
