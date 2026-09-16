@@ -59,9 +59,10 @@ Cerulean. DNS uses the persisted public WAN IP; NPM uses the host LAN IP.
 
 The browser-facing entry points come from `.env`: `WEB_URL`/`APP_URL` (the web
 app), `API_URL`, and `AUTH_URL`. Presigned document URLs are signed against
-`S3_PUBLIC_ENDPOINT` (e.g. `https://storage.signara.innotel.us`, exposed on
-host port `9002` by `docker-compose.override.prod.yml`) so browsers can reach
-object storage instead of the internal `minio:9000` host. The API derives its
+`S3_PUBLIC_ENDPOINT` (e.g. `https://storage.signara.innotel.us`) so browsers can
+reach object storage directly instead of through the API. Since the cutover that
+object storage is the estate's `onyx-objectstore`, and the `SIGNARA_S3_*`
+variables in `.env` select it — see “Storage profile” below. The API derives its
 CORS allowlist from `WEB_URL`/`APP_URL` — including the apex/parent domain of
 those hosts and `localhost:3000` for development — and only needs
 `CORS_ORIGINS` when an extra origin must be allowed.
@@ -79,8 +80,43 @@ those hosts and `localhost:3000` for development — and only needs
 | Metrics       | Prometheus on `:9090`, Grafana on `:3001`                                         |
 
 All Compose services include health checks, restart policies, resource limits,
-and bounded JSON logging. The API waits for PostgreSQL, Redis, MinIO, and
-Meilisearch before becoming ready.
+and bounded JSON logging. The API waits for PostgreSQL, Redis, and Meilisearch
+before becoming ready — deliberately **not** on the object store, so that the
+retired store can be stopped without the API refusing to boot.
+
+### Storage profile
+
+Documents live in an S3-compatible store selected entirely from `.env`. Moving
+stores is a configuration change, not a code change.
+
+| Variable | Purpose |
+| --- | --- |
+| `SIGNARA_S3_ENDPOINT` | Where the API reads and writes. Currently `http://172.17.0.1:2090`. |
+| `SIGNARA_S3_BUCKET` | Bucket holding document objects (default `signara-documents`). |
+| `SIGNARA_S3_ACCESS_KEY` / `SIGNARA_S3_SECRET_KEY` | Credentials for that store. |
+| `SIGNARA_S3_PUBLIC_ENDPOINT` | Host that browser-facing presigned URLs are signed for. |
+
+`S3_*` **without** the prefix is a different thing: MinIO's own root credentials,
+left untouched so the retired store can be started again for a rollback. Compose
+maps `SIGNARA_S3_*` onto the `S3_*` names the API reads, and `environment` wins
+over `env_file`.
+
+To move stores — copy first, which verifies every object byte for byte before
+anything is pointed at it:
+
+```bash
+SOURCE_S3_ENDPOINT=http://…:9002 SOURCE_S3_ACCESS_KEY=… SOURCE_S3_SECRET_KEY=… \
+TARGET_S3_ENDPOINT=http://…:2090 TARGET_S3_ACCESS_KEY=… TARGET_S3_SECRET_KEY=… \
+  node scripts/migrate-object-store.mjs --apply
+```
+
+Then change `SIGNARA_S3_*` and run
+`docker compose -f docker-compose.prod.yml -f docker-compose.override.prod.yml up -d --no-deps api`.
+Verify the store itself with `scripts/onyx-objectstore-smoke.sh` (plain REST, no
+client library in the way) and `scripts/onyx-s3-test.mjs` (a real S3 SDK); verify
+the *browser* path by presigning an object for `SIGNARA_S3_PUBLIC_ENDPOINT` and
+fetching it through the edge, then comparing it to the document's
+`checksumSha256`.
 
 ### Backups
 
@@ -134,11 +170,13 @@ The checked-in map at `infra/cerulean/hosts.conf` provisions:
 | `api.signara.innotel.us`     | WAN IP       | LAN IP `:8000` |
 | `auth.signara.innotel.us`    | WAN IP       | LAN IP `:9100` |
 | `admin.signara.innotel.us`   | WAN IP       | LAN IP `:81`   |
-| `storage.signara.innotel.us` | WAN IP       | LAN IP `:9002` |
+| `storage.signara.innotel.us` | WAN IP       | docker0 `:2090` |
 
-`storage` backs the browser-facing presigned document URLs (`S3_PUBLIC_ENDPOINT`)
-served by MinIO on host port `9002`; it needs no WebSocket support, so its
-`hosts.conf` entry is flagged `no`.
+`storage` backs the browser-facing presigned document URLs (`S3_PUBLIC_ENDPOINT`),
+served by the estate's `onyx-objectstore`. It is reached on the docker0 gateway
+(`172.17.0.1:2090`) because the store is deliberately not published on the LAN —
+only the loopback address and the bridge gateway answer. It needs no WebSocket
+support, so its `hosts.conf` entry is flagged `no`.
 
 On every normal provisioning run, Cerulean redetects and validates the current
 public WAN IPv4, persists it as `CERULEAN_WAN_IP`, and uses it for DNS. Cerulean
@@ -167,7 +205,7 @@ hosts and can request the wildcard certificate. Run it directly or through
 | `api.signara.innotel.us`     | api `:8000`                                          |
 | `auth.signara.innotel.us`    | Authentik host port `:9100` (container port `:9000`) |
 | `admin.signara.innotel.us`   | NPM admin UI or administration app                   |
-| `storage.signara.innotel.us` | MinIO host port `:9002` (container port `:9000`)     |
+| `storage.signara.innotel.us` | onyx-objectstore `172.17.0.1:2090` (container `:9000`) |
 
 ```bash
 export NPM_API_URL=http://<npm-host>:81

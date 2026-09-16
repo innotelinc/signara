@@ -15,8 +15,8 @@
 | **`sign.innotel.us`** | **Serves Signara** since 2026-09-15 | NPM host retargeted to `192.168.1.46:3000`; legacy `/api/` location dropped |
 | **Sign Platform (OpenSign fork)** | **Gone, not merely retired** | `192.168.1.11` answers no ICMP and nothing on `:3000`, `:8080`, `:27017`; no `sign-platform*` container or volume exists on this host |
 | **Legacy data** | **Presumed lost — unverified** | The backup script lived only on `.11` (`/usr/local/bin/sign-platform-backup.sh`), was never committed to the repo, and no archive exists on this host. §6 |
-| **Storage** | MinIO (bundled) | `signara-minio-1` healthy; `storage/minio.service.ts` |
-| **Onyx object store** | **Speaks SigV4 — the contract test is green against it** | `services/objectstore/sigv4.go` verifies `AWS4-HMAC-SHA256` header auth *and* presigned URLs; `sigv4_test.go` pins the key derivation to the published AWS vector. `storage.contract.spec.ts` runs put → stat → presign → fetch → delete through minio-js against a standalone build: **6/6** (2026-09-15). HTTP Basic is still accepted so an existing deployment survives the upgrade |
+| **Storage** | **onyx-objectstore; MinIO demoted to rollback** | API reads the `SIGNARA_S3_*` profile; 12 objects migrated and hash-verified; `signara-minio-1` stopped, `--profile legacy-storage` brings it back |
+| **Onyx object store** | **SigV4, deployed, and pinned to AWS's published vectors** | `services/objectstore/sigv4.go` verifies `AWS4-HMAC-SHA256` header auth *and* presigned URLs; `sigv4_test.go` pins the key derivation to the published AWS vector. `storage.contract.spec.ts` runs put → stat → presign → fetch → delete through minio-js against a standalone build: **6/6** (2026-09-15). HTTP Basic is still accepted so an existing deployment survives the upgrade |
 | **Identity** | Authentik-native, OIDC-only | `auth` module exposes `login`/`callback`/`refresh`/`logout`/`me` — **no password endpoint exists** (the posture the rest of the estate was moved to today) |
 | **Sign-in test** | Passing | `scripts/verify-sso.py` — member signs in and `/auth/me` names them; an outsider is refused by the application's group binding; no password endpoint |
 
@@ -141,10 +141,39 @@ answered `Method Not Allowed` for `HEAD` bucket/object (every SDK probes a bucke
 before writing), and it dropped `x-amz-meta-*` headers, so a client could not
 check a download against the hash it uploaded.
 
-**Exit:** the round-trip contract test is green against Onyx **(met 2026-09-15 —
-6/6 through minio-js against a standalone `onyx-objectstore`)**. What remains is
-the deployment half: point `S3_ENDPOINT` at Onyx in production, copy the existing
-objects across, and demote bundled MinIO to dev-only.
+**Exit — met 2026-09-15.** Both the contract and the deployment half are done and
+verified end to end:
+
+- The store was rebuilt from this tree and redeployed, so SigV4 exists in the
+  *running* container. Proven with the repo's own forward probe —
+  `scripts/onyx-s3-test.mjs`, written when SDK support was still a prediction and
+  now passing — and with `storage.contract.spec.ts` against the deployed endpoint
+  and its real credentials, 6/6, presigned fetch included.
+- `scripts/migrate-object-store.mjs` copied **and verified** all 12 objects
+  (259,679 bytes): each was read back out of the target and compared on size and
+  SHA-256, and every hash matched the `checksumSha256` the database already held.
+- The API reads the `SIGNARA_S3_*` profile (a config change, not a code change —
+  §5, and “Storage profile” in `docs/Deployment.md` for the rollback), MinIO is reduced to the
+  `legacy-storage` profile and stopped, and its own credentials were deliberately
+  left untouched so it can be restarted for a rollback.
+- Verified through the **browser** path rather than only the API: a presigned URL
+  signed for `storage.signara.innotel.us`, fetched through the edge, returned
+  bytes whose SHA-256 equals the recorded checksum — with MinIO stopped. The same
+  URL replayed against a different host is refused (`SignatureDoesNotMatch`).
+
+**Track A had a third gap, and only running it live found it.** The bucket listing
+read a bucket's top level and skipped directories, so every key containing `/` was
+invisible — and every key Signara writes is `<org>/documents/<uuid>.pdf`. The
+running store listed **1** object while holding **16**. Anything built on a
+listing — a backup, an inventory, an age-out sweep — would have omitted every
+document *without an error*. The listing is now recursive and honours
+`prefix`/`delimiter`, with `http_list_test.go` pinning it and the REST smoke test
+covering it end to end.
+
+Two stale artefacts were corrected in the same pass: `onyx-objectstore-smoke.sh`
+claimed SDKs could not talk to the store, and its own object calls omitted the
+bucket from the URL, so it could never have passed; and `onyx-s3-test.mjs` was
+still labelled a probe that was expected to fail.
 
 ### W4 — Legacy history (P3, re-scoped)
 See §6. The ETL described in `CONVERGENCE.md` v1 (Mongo → Postgres, files →
@@ -189,7 +218,7 @@ stale references.
 |---|---|---|---|
 | **P0 — Freeze legacy** | sign-platform stable fallback + backups | **Moot** — the host is gone; nothing to freeze | replaced by §6 recovery attempt |
 | **P1 — Parity** | W1 + W2 | **In progress** | every parity row shipped/decided/scheduled; verify script green |
-| **P2 — Onyx** | W3 | **Unblocked** — SigV4 landed, contract green; remaining work is the prod cutover | round-trip contract test green against Onyx in prod |
+| **P2 — Onyx** | W3 | **Done 2026-09-15** — SigV4 shipped and deployed, 12 objects migrated and verified, MinIO demoted | a presigned fetch through the edge returns the recorded checksum with MinIO stopped |
 | **P3 — Migration** | W4 | **Conditional on §6** | counts reconcile *or* a recorded write-off |
 | **P4 — Cutover** | W5 | **Done** (2026-09-15) | signers sign on Signara at `sign.innotel.us` |
 | **P5 — Retire legacy** | archive the `sign` repo, drop dead DNS/proxy hosts, final doc pass | **Not started** | nothing in the estate refers to OpenSign except history |
@@ -206,13 +235,12 @@ stale references.
    import, SMS/WhatsApp) are now `question` issues that need an owner's answer,
    not a default.
 4. ~~Open the Onyx SigV4 work item and land it~~ — **done 2026-09-15**
-   (`services/objectstore/sigv4.go` + `storage.contract.spec.ts`, 6/6 green).
-   What is left is the cutover itself: `S3_ENDPOINT` → Onyx in production, copy
-   the objects, demote MinIO to dev-only.
+   (`services/objectstore/sigv4.go`, `storage.contract.spec.ts` 6/6, and
+   `sigv4_vectors_test.go` replaying AWS's published vector suite against it).
 5. **Make the backup target a different host** and run one restore drill.
-6. **Cut storage over to Onyx** (W3's remaining half): point `S3_ENDPOINT` at
-   it, copy the objects, verify against `DocumentVersion.checksumSha256`, then
-   reduce bundled MinIO to a dev-only profile.
+6. ~~**Cut storage over to Onyx**~~ — **done 2026-09-15**: 12 objects migrated
+   and verified against `checksumSha256`, `SIGNARA_S3_*` points at the store,
+   MinIO demoted to `legacy-storage` and stopped. See W3.
 
 ## 6. The legacy data question (do this first)
 

@@ -1,8 +1,22 @@
-// FORWARD PROBE — for the onyx-objectstore S3-gateway milestone (SigV4 +
-// presigned URLs). onyx-objectstore v0.1 is Basic-auth only, so MinIO SDK
-// calls FAIL against it today (see scripts/onyx-objectstore-smoke.sh for the
-// working v0.1 verification). Run this once the milestone ships:
-//   node --experimental-vm-modules scripts/onyx-s3-test.mjs
+// The onyx-objectstore S3-gateway check: a real MinIO SDK against the store,
+// covering put, get, presign, a presigned fetch, and delete.
+//
+// This was written as a FORWARD PROBE, when the store was HTTP Basic only and
+// SDK calls were *expected* to fail. That milestone has since shipped: SigV4 —
+// header and presigned — is implemented, pinned to AWS's published vector suite
+// (onyx services/objectstore/sigv4_vectors_test.go), and deployed. So this is
+// now a check rather than a prediction, and passing it is what made Signara's
+// storage cutover possible.
+//
+// Credentials are read from /tmp/onyx-ak and /tmp/onyx-sk (mode 600) so they
+// never reach argv or shell history. They are the store's S3_ACCESS_KEY and
+// S3_SECRET_KEY, which live in Cerulean Vault (cerulean/onyx) and are what the
+// running container resolves at startup:
+//
+//   vault kv get -format=json cerulean/onyx   # read them
+//   node scripts/onyx-s3-test.mjs             # then run this
+//
+// scripts/onyx-objectstore-smoke.sh is the same endpoint driven by curl alone.
 import * as Minio from 'minio';
 import { readFileSync } from 'node:fs';
 
