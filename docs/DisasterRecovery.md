@@ -13,15 +13,17 @@
 | Asset                                                       | Method                                              | Location                                                        |
 | ----------------------------------------------------------- | --------------------------------------------------- | --------------------------------------------------------------- |
 | PostgreSQL (all tables)                                     | `pg_dump -Fc` (custom)                              | `infra/backup/backup.sh` → `/backup-cache` → optional S3 mirror |
-| MinIO objects (documents, signature images, template files) | `mc mirror`                                         | same job; enable MinIO bucket versioning                        |
+| Object storage (documents, signature images, template files) | `mc mirror` / `scripts/migrate-object-store.mjs`    | same job; enable bucket versioning on the target                |
 | Configuration                                               | `.env`, `docker-compose*.yml`, `infra/`, `openapi/` | git (repository is the source of truth)                         |
 | Authentik (IdP)                                             | its own backups                                     | configure separately — identity metadata matters (see § 5)      |
 
 The backup container (`docker-compose.prod.yml` -> `backup` service) runs
 `backup.sh` at `BACKUP_INTERVAL_SECONDS` intervals and records Prometheus-exportable
 status files used by the `BackupJobFailed` / `BackupStale` alerts. Every run keeps
-PostgreSQL dumps and a MinIO object archive on the `backupcache` volume; configured
-remote S3 credentials add an off-host mirror.
+PostgreSQL dumps and an object-storage archive on the `backupcache` volume;
+configured remote S3 credentials add an off-host mirror. The archive follows the
+storage profile (`SOURCE_S3_*` in the compose file), so it backs up whichever
+store the API is actually using rather than naming one.
 
 ## 3. Restore playbook
 
@@ -109,9 +111,37 @@ on login.
 
 ### Object storage down (alert `StorageEndpointDown`)
 
-1. Check MinIO container status and available disk space (`StorageAlmostFull`).
-2. API uploads/downloads already return 503s — signing fails at presign.
-3. Restore MinIO from the last backup mirror if data volume is corrupt.
+The store is the estate's `onyx-objectstore` (`SIGNARA_S3_ENDPOINT`), no longer a
+bundled MinIO — see “Storage profile” in `docs/Deployment.md`.
+
+1. Look on the **onyx-platform** deployment, not this one:
+   `docker ps --filter name=onyx-objectstore`, plus its disk space
+   (`StorageAlmostFull`). The API and the store are separate stacks, so "Signara
+   is up" says nothing about the store.
+2. API uploads and downloads return 503s, because signing fails at presign.
+3. If the store's state volume is corrupt, restore the bucket from the last
+   backup mirror — or fall back to MinIO, below.
+
+### Storage rollback (back to bundled MinIO)
+
+MinIO was stopped, not removed, and every object it held is still in its volume.
+It now sits behind the `legacy-storage` profile:
+
+```bash
+cd /usr/src/projects/complete/1-primary/signara
+docker compose -f docker-compose.prod.yml -f docker-compose.override.prod.yml \
+  --profile legacy-storage up -d minio
+# point SIGNARA_S3_* in .env back at MinIO — endpoint http://minio:9000, and the
+# S3_ACCESS_KEY / S3_SECRET_KEY that were deliberately left unchanged
+docker compose -f docker-compose.prod.yml -f docker-compose.override.prod.yml up -d --no-deps api
+```
+
+**Copy the objects back first, or you will lose them.** Everything written since
+the cutover lives only in the Onyx store; MinIO's volume is a snapshot of the
+moment it was demoted. Run `scripts/migrate-object-store.mjs` in the other
+direction (`SOURCE_S3_*` = the store, `TARGET_S3_*` = MinIO) before trusting a
+rollback. The `SIGNARA_S3_*` indirection exists so this is a config change: MinIO
+keeps its own credentials throughout.
 
 ### Backup failure (alert `BackupJobFailed` / `BackupStale`)
 
