@@ -302,6 +302,13 @@ class AuthApi:
 # ── the flow ───────────────────────────────────────────────────────────────
 
 
+def unreachable(err, host):
+    """A name that does not resolve, or a connection that never lands."""
+    if "Name or service not known" in str(err) or "Temporary failure" in str(err):
+        return f"cannot resolve {host} from this host ({err})"
+    return f"cannot reach {host} ({err})"
+
+
 def require(condition, message):
     """A hop assertion: raise on failure, print nothing on success."""
     if not condition:
@@ -485,6 +492,12 @@ def main():
         return 2
     except CheckFailed as err:
         print(f"\n{BAD} — {err}", file=sys.stderr)
+        return 1
+    except (urllib.error.URLError, OSError) as err:
+        # A name that does not resolve is a finding about this run, not a
+        # traceback: an unhandled gaierror used to bury the checks that had
+        # already passed behind a stack trace out of urllib.
+        print(f"\n{BAD} — {unreachable(err, cfg.api_origin)}", file=sys.stderr)
         return 1
     finally:
         for username, pk in ((MEMBER_USER, member_pk), (OUTSIDER_USER, outsider_pk)):
