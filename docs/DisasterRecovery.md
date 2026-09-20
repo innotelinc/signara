@@ -51,19 +51,28 @@ worse than none, because it reports green. The backup store writes to the host
 path `/srv/signara-backup-store` (a bind mount, not a volume) with its own
 credentials, so tearing the e2e stack down does not touch it.
 
-**The mirror's own retention was silently broken until 2026-09-20, and the fix is
-the trailing `/` in `backup.sh`.** Every run since 02:15 logged three
-`can't limit to single files when using filters` errors and pruned nothing. The
-cause is in the store, not the client: `onyx-objectstore` answers **`200` to
-`HEAD /bucket/<prefix>`** for a key that does not exist, because a prefix is a
-directory on disk and the handler only `stat`s the path — it never requires a
-regular file (`onyx/services/objectstore/http.go`, the `MethodHead` case of
-`s3Object`). rclone probes with HEAD to decide file-vs-directory, concludes
-`bucket/postgres` is a file, and refuses `--min-age` on a single file. Each leg is
-`|| true`, so the mirror grew without bound instead of failing. Pruning with the
-directory form (`$mirror/$prefix/`) is unambiguous and works against any S3
-store; the store's HEAD is still wrong for every other client and is written up
-for the ONYX repository.
+**The mirror's own retention was silently broken until 2026-09-20, and the cause
+was in the store rather than the client.** Every run since 02:15 that day logged
+three `can't limit to single files when using filters` errors and pruned nothing:
+`onyx-objectstore` answered **`200` to `HEAD /bucket/<prefix>`** for a key that
+does not exist, because a prefix is a directory on disk and the handler only
+`stat`ed the path — it never required a regular file
+(`onyx/services/objectstore/http.go`, the `MethodHead` case of `s3Object`). rclone
+probes with HEAD to decide file-vs-directory, concluded `bucket/postgres` was a
+file, and refused `--min-age` on a single file. Each leg is `|| true`, so the
+mirror grew without bound instead of failing.
+
+**Both halves are fixed on 2026-09-20.** The store now answers `404` to a `HEAD`
+or `GET` for a key that names a prefix, with a regression test that fails against
+the old behaviour (`200` from HEAD, `500` from GET); both deployed stores — the
+Signara storage plane on the deployment host and the backup mirror on `.10` —
+were rebuilt from that change and verified live. The form that used to return
+nothing, `rclone lsf :s3:signara-backups/postgres`, now lists the dumps, and
+`rclone lsjson --stat` reports the prefix as `inode/directory`, which is what
+`--min-age` needs. `backup.sh` keeps the directory form (`$mirror/$prefix/`) not
+because it is required any more but because it is unambiguous against any S3
+store, fixed or not — and the same fix covers every other client that stats an
+object before reading it, which was the wider exposure.
 
 **Off-host is decided by `signara_backup_mirror_offhost`, not by
 `remote_enabled`.** "A mirror is configured" and "the mirror is somewhere else"
