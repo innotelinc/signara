@@ -18,7 +18,9 @@ export default () => ({
     ),
   },
   database: {
-    url: process.env.DATABASE_URL ?? 'postgresql://signara:signara@localhost:5432/signara?schema=public',
+    url:
+      process.env.DATABASE_URL ??
+      'postgresql://signara:signara@localhost:5432/signara?schema=public',
   },
   redis: {
     url: process.env.REDIS_URL ?? 'redis://localhost:6379',
@@ -95,6 +97,17 @@ export default () => ({
   monitoring: {
     otelEndpoint: process.env.OTEL_EXPORTER_OTLP_ENDPOINT ?? '',
     sentryDsn: process.env.SENTRY_DSN ?? '',
+  },
+  // Automatic reminders for signing requests nobody has acted on (issue #82).
+  // The sweep is a repeatable job on the signing queue, not a cron entry: if the
+  // API is not running, nothing is reminded.
+  reminders: {
+    sweepIntervalMinutes: Number(process.env.REMINDER_SWEEP_INTERVAL_MINUTES ?? 360),
+    // Wait this long after the last reminder before sending the next one.
+    afterDays: Number(process.env.REMINDER_AFTER_DAYS ?? 3),
+    // Stop after this many automatic reminders, so an ignored request cannot
+    // become harassment.
+    max: Number(process.env.REMINDER_MAX ?? 3),
   },
 });
 
