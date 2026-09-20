@@ -1,0 +1,7 @@
+# Harvested locale catalogs — byte-identical to the retired OpenSign fork, and
+# verified by sha256 per locale (see apps/web/public/locales/README.md and the
+# archive inventory in sign/ARCHIVE.md). Reformatting them would break that
+# provenance, which is the whole point of the harvest, so the formatter is kept
+# out of this directory. Add a language by copying its directory, not by running
+# prettier here.
+apps/web/public/locales/

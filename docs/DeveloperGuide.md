@@ -49,6 +49,11 @@ Swagger: http://localhost:8000/api/v1/docs
 - **Tenancy**: always scope Prisma queries by `organizationId` from
   `user.org.id` (`@CurrentUser()`). Never trust client-supplied org ids.
 - **Naming**: files `kebab-case`; classes `PascalCase`; constants `UPPER_SNAKE`.
+- **Copy / i18n**: user-visible strings in the web app go through
+  `t(key, 'English default')` from `@/components/i18n/locale-provider`, never a
+  bare literal — the English default is what renders when a locale has no key.
+  Catalogs live in `apps/web/public/locales/<locale>/translation.json`, so a new
+  language needs no rebuild; see `apps/web/src/lib/i18n/README.md`.
 - **Formatting**: Prettier (repo config). `npm run format`.
 - **Commits**: Conventional Commits — `feat:`, `fix:`, `docs:`, `chore:`.
 - **DB changes**:

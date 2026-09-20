@@ -18,12 +18,16 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { api } from '@/lib/api';
+import { useTranslation } from '@/components/i18n/locale-provider';
+import { LocaleSwitcher } from '@/components/i18n/locale-switcher';
 
+// `key` is the harvested OpenSign catalog key; `label` is the English default
+// that renders until a locale's catalog is loaded (see lib/i18n/README.md).
 const NAV_ITEMS = [
-  { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { href: '/documents', label: 'Documents', icon: FileText },
-  { href: '/templates', label: 'Templates', icon: FileSignature },
-  { href: '/settings', label: 'Settings', icon: Settings },
+  { href: '/dashboard', key: 'sidebar.Dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { href: '/documents', key: 'sidebar.Documents', label: 'Documents', icon: FileText },
+  { href: '/templates', key: 'sidebar.Templates', label: 'Templates', icon: FileSignature },
+  { href: '/settings', key: 'sidebar.Settings', label: 'Settings', icon: Settings },
 ];
 
 const DESKTOP_QUERY = '(min-width: 1024px)';
@@ -37,6 +41,7 @@ interface Me {
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const { t } = useTranslation();
   const [me, setMe] = useState<Me | null>(null);
 
   // Auto-collapse: below lg the sidebar is an off-canvas drawer (closed by
@@ -161,7 +166,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
 
         <nav className="flex-1 space-y-1 px-3 py-4" aria-label="Main navigation">
-          {NAV_ITEMS.map(({ href, label, icon: Icon }) => {
+          {NAV_ITEMS.map(({ href, key, label, icon: Icon }) => {
             const active = pathname === href || pathname.startsWith(`${href}/`);
             return (
               <Link
@@ -175,11 +180,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 aria-current={active ? 'page' : undefined}
               >
                 <Icon className="h-4 w-4" />
-                {label}
+                {t(key, label)}
               </Link>
             );
           })}
         </nav>
+
+        <LocaleSwitcher className="border-t border-slate-800 py-3" />
 
         <div className="border-t border-slate-800 p-3">
           {me && (
@@ -207,7 +214,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-slate-400 transition-colors hover:bg-slate-800 hover:text-white"
           >
             <LogOut className="h-4 w-4" />
-            Sign out
+            {t('log-out', 'Log Out')}
           </button>
         </div>
       </aside>
