@@ -335,7 +335,7 @@ the artifact came from. Both routes below have been used on this host:
   `signara-frontend-1` both carried `RepoDigests` pointing at images CI built on
   2026-09-07, so they were pulled rather than built here.
 - **Host build — what runs now.** Those pulled images had been built by
-  `docker-build.yml` *without* the web image's `NEXT_PUBLIC_*` build args, so the
+  `docker-build.yml` _without_ the web image's `NEXT_PUBLIC_*` build args, so the
   Dockerfile's `http://localhost` defaults were inlined into the client bundle:
   the landing page's sign-in link and the signing room's session fetch both
   resolved to `localhost:8000`, and the demo could not open a session. §6.1 is the
@@ -402,6 +402,15 @@ $COMPOSE up -d --no-deps api frontend
   the state that produces half-migrated reads.
 - Never `prisma migrate reset`, `db push` or `--force-reset` in production. They
   drop the database, and the dump is the only thing that would bring it back.
+- **A migration is not the whole upgrade.** The RBAC catalog (`Permission`,
+  `Role`, `RolePermission`) is data, seeded by `packages/database/prisma/seed.ts`
+  — so a release that adds a permission silently locks the new routes out until
+  the seed runs. It cannot run on the host: `tsx` and the seed's dev dependencies
+  are pruned from the API image, and `migrate` runs only `prisma migrate deploy`.
+  Either run `npm run db:seed:rbac -w @signara/database` from a dev checkout
+  against this database, or apply the same rows by hand — the seed is an upsert,
+  so it agrees with a manual insert (`webhooks.manage` for #85 was applied this
+  way, granted to `ORGANIZATION_OWNER` and `ADMINISTRATOR`).
 
 ### 6.4 Verify, then record
 
