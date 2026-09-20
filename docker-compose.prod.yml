@@ -383,6 +383,9 @@ services:
       BACKUP_RUN_ON_START: ${BACKUP_RUN_ON_START:-false}
       BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
       BACKUP_REQUIRE_REMOTE: ${BACKUP_REQUIRE_REMOTE:-false}
+      # Addresses that mean "this host", for the off-host check. The job cannot
+      # see them from inside the container, so they are declared here.
+      BACKUP_LOCAL_ADDRESSES: ${BACKUP_LOCAL_ADDRESSES:-}
     volumes:
       - ./infra/backup:/backup:ro
       - backupcache:/backup-cache
