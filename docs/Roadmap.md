@@ -273,16 +273,20 @@ so `provision.py` cannot express them; they are managed by Cerulean directly.
 
 ### W6 — Operations (P5)
 
-- [ ] **Backups that exist off the box:** the job now runs on the deployment with
-      a working mirror — `BACKUP_S3_*` → ONYX's object store, `BACKUP_REQUIRE_REMOTE=true`,
-      the identity database included, all four metrics healthy as of 2026-09-20
-      (`status 1`, `remote_enabled 1`, `remote_last_success` fresh,
-      `identity_covered 1`) — **but it is the same host, so
-      `signara_backup_mirror_offhost` is 0 and `BackupIsLocalOnly` correctly keeps
-      alerting.** A second copy on the same machine protects against a bad delete, a
-      corrupted object or a botched upgrade; it does not protect against losing the
-      host. Remaining: a mirror on another host, with `BACKUP_LOCAL_ADDRESSES` naming
-      this one so the metric can prove it.
+- [x] **Backups that exist off the box — 2026-09-20.** The mirror now lives on
+      another machine: `BACKUP_S3_*` points at a dedicated `onyx-objectstore` on
+      `192.168.1.10:2091` (host `onyx`), `BACKUP_REQUIRE_REMOTE=true`, the identity
+      database included, and `signara_backup_mirror_offhost` reads **1** — checked in
+      Prometheus, not inferred — so `BackupIsLocalOnly` clears. Verified by reading
+      the objects back off `.10`'s disk. Two deliberate choices, both learned from
+      near-misses here: the store is **dedicated**, not `.10`'s existing e2e
+      object store (that one keeps objects in a docker named volume with the
+      checked-in `onyx-e2e-access` credentials, so a `down -v` would delete the
+      backups and anyone could read them); and its storage is a **host bind mount**
+      (`/srv/signara-backup-store`), so a dev teardown cannot take it with it.
+      What remains is _off-site_, not off-host — a LAN peer is not a copy that
+      survives the site — and `.10` is a development box rather than a provisioned
+      backup target. This item is met; that is the next durability step.
 - [x] **A restore drill, performed and recorded** — `scripts/restore-drill.sh`
       (2026-09-20): seed mode, dump mode, refusal of a non-Signara dump, and then a
       **production dump fetched back out of the ONYX mirror and restored on the
@@ -323,12 +327,13 @@ so `provision.py` cannot express them; they are managed by Cerulean directly.
       verification, and rollback.
 
 **Exit:** the restore drill is a dated entry in the DR doc, not a plan — **met,
-including against a production dump on the deployment host.** What remains is
-durability rather than procedure: (1) the mirror has to leave this host, and (2)
-monitoring delivery — the stack now runs, but nothing can be sent anywhere until a
-relay exists (see the monitoring item above). The upgrade path is written
-(`docs/Deployment.md` §6). Until the mirror is off-host, the RTO of
-≤ 4 h is an estimate for anything that takes the machine with it.
+including against a production dump on the deployment host** — and the mirror is
+now on another host (`signara_backup_mirror_offhost` 1). What remains is
+durability and delivery beyond that: an **off-site** copy, since a LAN peer
+does not survive the site, and monitoring delivery — the stack runs, but nothing
+can be sent anywhere until a relay exists (see the monitoring item above). The
+upgrade path is written (`docs/Deployment.md` §6). The RTO of ≤ 4 h now covers
+losing this host; it is still an estimate for anything that takes the whole LAN.
 
 ## 4. Phase plan
 

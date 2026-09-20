@@ -173,9 +173,19 @@ if [[ -n "${BACKUP_S3_ENDPOINT:-}" || -n "${BACKUP_S3_ACCESS_KEY:-}" || -n "${BA
   fi
   # Age is the object's own timestamp as the store reports it, which is when it
   # was mirrored; `--leave-root` keeps the bucket prefixes themselves.
+  #
+  # The trailing `/` is load-bearing. Without it rclone probes the path with a
+  # HEAD to decide file-vs-directory, and onyx-objectstore answers **200 for a
+  # key prefix** (a prefix is a directory on disk, and the handler only stats
+  # the path — it never requires a regular file). rclone therefore takes
+  # `bucket/postgres` for a file, refuses `--min-age` on it ("can't limit to
+  # single files when using filters") and prunes nothing — silently, because
+  # each leg is `|| true`. That is how the mirror grew without bound and how
+  # every run since 2026-09-20 02:15 logged three errors nobody acted on. As a
+  # directory the same call is unambiguous and works against any S3 store.
   for prefix in minio postgres authentik; do
-    rclone "${mirror_flags[@]}" delete --min-age "${RETENTION_DAYS}d" "$mirror/$prefix" || true
-    rclone "${mirror_flags[@]}" rmdirs --leave-root "$mirror/$prefix" || true
+    rclone "${mirror_flags[@]}" delete --min-age "${RETENTION_DAYS}d" "$mirror/$prefix/" || true
+    rclone "${mirror_flags[@]}" rmdirs --leave-root "$mirror/$prefix/" || true
   done
   REMOTE_OK=true
 
