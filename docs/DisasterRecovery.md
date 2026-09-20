@@ -12,7 +12,7 @@
 
 | Asset                                                       | Method                                              | Location                                                        |
 | ----------------------------------------------------------- | --------------------------------------------------- | --------------------------------------------------------------- |
-| PostgreSQL (all tables)                                     | `pg_dump -Fc` (custom)                              | `infra/backup/backup.sh` → `/backup-cache` → optional S3 mirror |
+| PostgreSQL (all tables)                                     | `pg_dump -Fc` (custom)                              | `infra/backup/backup.sh` → `/backup-cache` → **off-host S3 mirror** (required for durability, §2) |
 | Object storage (documents, signature images, template files) | `mc mirror` / `scripts/migrate-object-store.mjs`    | same job; enable bucket versioning on the target                |
 | Configuration                                               | `.env`, `docker-compose*.yml`, `infra/`, `openapi/` | git (repository is the source of truth)                         |
 | Authentik (IdP)                                             | its own backups                                     | configure separately — identity metadata matters (see § 5)      |
@@ -24,6 +24,20 @@ PostgreSQL dumps and an object-storage archive on the `backupcache` volume;
 configured remote S3 credentials add an off-host mirror. The archive follows the
 storage profile (`SOURCE_S3_*` in the compose file), so it backs up whichever
 store the API is actually using rather than naming one.
+
+**Off-host is the requirement, not the option.** Backup files on `backupcache`
+pass every freshness and completeness check while sitting on the same host as the
+database they protect, and they die with it — which is how this estate lost a
+platform's entire history (see `1-primary/sign/ARCHIVE.md` §8). So the two states
+are reported separately: `signara_backup_last_success_timestamp` says a backup ran,
+`signara_backup_remote_enabled` says one left the box, and the second one has its
+own alert (`BackupIsLocalOnly`). **Posture as of 2026-09-20: no target is
+configured — `BACKUP_S3_*` is empty, so `signara_backup_remote_enabled` is 0 and
+the alert fires.** Satisfying it means pointing `BACKUP_S3_*` at a store on
+another host (ONYX's object store is the estate's storage owner and speaks S3, so
+it is the natural target), then setting `BACKUP_REQUIRE_REMOTE=true` so a missing
+mirror fails the run instead of quietly downgrading it — and running the drill
+below against the result.
 
 ## 3. Restore playbook
 
@@ -62,12 +76,43 @@ docker compose -f docker-compose.prod.yml exec \
 
 ## 4. Verification drills
 
-- **Monthly**: restore the latest dump into a scratch database
-  (`createdb signara_drill && pg_restore -d signara_drill latest.dump`), run
-  `prisma migrate status` and a count sanity script.
+```bash
+scripts/restore-drill.sh                          # seed a database from this repo's migrations
+scripts/restore-drill.sh --dump /path/to/prod.dump  # drill a real backup
+scripts/restore-drill.sh --dump x.dump --keep       # leave the target running to poke at
+```
+
+Seed mode creates two throwaway Postgres containers, builds a source database from
+this repo's own migrations, writes sentinel rows, backs it up with the same
+`pg_dump -Fc` the job uses, restores it with the same `pg_restore --clean
+--if-exists --exit-on-error` `restore.sh` uses, and then checks what actually came
+back: row counts per table, the public-table count, a foreign-key join, and the
+document checksum the completion certificate anchors on. Both containers are
+removed afterwards, including on failure. It needs only Docker — so an operator
+can drill a production dump from a laptop — and it refuses a dump that has no
+Signara table data *before* restoring, because a dump of the wrong database
+restores perfectly and proves nothing.
+
+**Drill record** — the exit criterion for workstream W6 is a dated entry here, not
+a plan:
+
+| Date       | Scope                                                                | Result                                                                                                                                                                                                                                                                                                                                                              |
+| ---------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-09-20 | Seed mode, `scripts/restore-drill.sh` on this repository              | **PASS** — 4 migrations, 33 public tables, sentinel Organization/User/Workspace/Document rows all present after restore, workspace→organization join intact, document checksum `7f83b165…d9069` byte-identical, restore under 30 s                                                                                                                                    |
+| 2026-09-20 | Dump mode on that run's output (`sha256 bbddf68678357c44e4b241df2bc21f3432715a89a4abf54aea4a9cd391b236de`) | **PASS** — 33 table-data entries restored, `_prisma_migrations` intact                                                                                                                                                                                                                                                                                            |
+| 2026-09-20 | Dump mode against a non-Signara dump                                    | **Refused, as intended** — fails with "carries no Organization table data" instead of reporting a clean restore                                                                                                                                                                                                                                                     |
+
+**What this did not prove, and what still has to happen.** The drill ran on a
+workspace host with no Signara stack and no backups on it, so it proves the
+*restore path* — the tooling, the invocation and the checks — not any particular
+backup of real data. Workstream W6 stays open until (1) `BACKUP_S3_*` points at a
+store on another host, and (2) a drill is run against a **production** dump on the
+deployment host, with that run's date and dump checksum recorded in the table
+above. Until then the RTO of ≤ 4 h is an estimate, not a measurement.
+
+- **Monthly**: rerun the drill above and add a row to the table.
 - **Quarterly**: full instance burn-in on a scratch host, including signing a
   test envelope and generating an evidence report.
-- Record drill outcomes and keep the RTO estimate fresh.
 
 ## 5. Identity provider continuity
 
@@ -149,6 +194,19 @@ keeps its own credentials throughout.
 2. Common causes: Postgres credentials rotated, S3 endpoint unreachable,
    disk full on the backup volume.
 3. Re-run manually: `docker compose -f docker-compose.prod.yml exec backup /backup/backup.sh`.
+
+### Backups are not leaving the host (alert `BackupIsLocalOnly`)
+
+1. `docker compose -f docker-compose.prod.yml exec backup cat /backup-cache/status.prom`
+   — `signara_backup_remote_enabled 0` with `last_status 1` means the job is
+   healthy and the *durability* is not.
+2. The fix is a target, not a rerun: set `BACKUP_S3_ENDPOINT`, `BACKUP_S3_BUCKET`,
+   `BACKUP_S3_ACCESS_KEY` and `BACKUP_S3_SECRET_KEY` to a store on a different
+   host, then set `BACKUP_REQUIRE_REMOTE=true` so a missing mirror fails the run
+   rather than downgrading it, and recreate the backup service.
+3. Confirm the mirror actually holds the archive before trusting it, then run
+   `scripts/restore-drill.sh` against a dump fetched from that store — the point
+   of the mirror is that the restore path works from it, not that bytes arrived.
 
 ### Certificate expiry (alert `CertificateExpiringSoon`)
 
