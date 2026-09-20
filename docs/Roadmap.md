@@ -205,6 +205,19 @@ claimed SDKs could not talk to the store, and its own object calls omitted the
 bucket from the URL, so it could never have passed; and `onyx-s3-test.mjs` was
 still labelled a probe that was expected to fail.
 
+**A fourth gap, found a week later by the backup mirror.** The store answered
+`200` to a `HEAD` for a key that names a prefix — a prefix is a directory on
+disk and the handler `stat`ed it without requiring a regular file — and `500` to
+the `GET` that followed it, because reading a directory is `EISDIR`. Real S3
+answers `404`. Not cosmetic: rclone probes with HEAD to decide
+file-versus-directory, so it took `bucket/postgres` for a single object, listed
+nothing beneath it and refused `--min-age` on it, and the backup mirror pruned
+nothing for weeks while every run logged success (`docs/DisasterRecovery.md` §2).
+HEAD and GET now answer `404` for such a key and both reads share one
+`statObjectFile`, pinned by `http_object_prefix_test.go`; both deployed stores —
+the storage plane and the mirror — were rebuilt from the fix and probed live.
+The wider exposure was every client that stats an object before downloading it.
+
 ### W4 — Legacy history (P3, re-scoped)
 
 See §6. The ETL described in `CONVERGENCE.md` v1 (Mongo → Postgres, files →
@@ -286,7 +299,12 @@ so `provision.py` cannot express them; they are managed by Cerulean directly.
       (`/srv/signara-backup-store`), so a dev teardown cannot take it with it.
       What remains is _off-site_, not off-host — a LAN peer is not a copy that
       survives the site — and `.10` is a development box rather than a provisioned
-      backup target. This item is met; that is the next durability step.
+      backup target. This item is met; that is the next durability step. The
+      mirror's **retention had been pruning nothing** since 2026-09-20 02:15 while
+      every run reported success; the cause was in `onyx-objectstore`, not the
+      backup script, and it is fixed there (W3's fourth gap), with both stores
+      rebuilt. The `rclone lsf` form that used to return nothing now lists the
+      dumps.
 - [x] **A restore drill, performed and recorded** — `scripts/restore-drill.sh`
       (2026-09-20): seed mode, dump mode, refusal of a non-Signara dump, and then a
       **production dump fetched back out of the ONYX mirror and restored on the
