@@ -56,6 +56,11 @@ class HostEntry:
     subdomain: str
     port: int
     websockets: bool = False
+    # Optional explicit upstream host. Most entries forward to CERULEAN_LAN_IP,
+    # but a name whose backend is bound to loopback (the SSO-gated NPM admin
+    # door is oauth2-proxy on 127.0.0.1:4180) is not reachable that way, so it
+    # has to say so here rather than let provisioning silently repoint it.
+    host: str | None = None
 
 
 def load_dotenv(path: Path) -> None:
@@ -80,9 +85,9 @@ def parse_hosts(path: Path) -> list[HostEntry]:
         if not line:
             continue
         parts = line.split()
-        if len(parts) < 2 or len(parts) > 3:
+        if len(parts) < 2 or len(parts) > 4:
             raise ValueError(
-                f"{path}:{line_number}: expected '<subdomain> <port> [websockets]'"
+                f"{path}:{line_number}: expected '<subdomain> <port> [websockets] [upstream-host]'"
             )
         subdomain = parts[0].lower()
         if not subdomain.replace("-", "").replace(".", "").isalnum():
@@ -93,8 +98,22 @@ def parse_hosts(path: Path) -> list[HostEntry]:
             raise ValueError(f"{path}:{line_number}: invalid port {parts[1]!r}") from None
         if not 1 <= port <= 65535:
             raise ValueError(f"{path}:{line_number}: port must be 1-65535")
-        websockets = len(parts) == 3 and parts[2].lower() in {"yes", "true", "1", "on"}
-        entries.append(HostEntry(subdomain, port, websockets))
+        websockets = len(parts) >= 3 and parts[2].lower() in {"yes", "true", "1", "on"}
+        host: str | None = None
+        if len(parts) == 4:
+            candidate = parts[3]
+            try:
+                parsed_host = ipaddress.ip_address(candidate)
+            except ValueError:
+                raise ValueError(
+                    f"{path}:{line_number}: invalid upstream host {candidate!r}"
+                ) from None
+            if parsed_host.version != 4 or parsed_host.is_unspecified:
+                raise ValueError(
+                    f"{path}:{line_number}: upstream host must be a concrete IPv4 address"
+                )
+            host = str(parsed_host)
+        entries.append(HostEntry(subdomain, port, websockets, host))
     if not entries:
         raise ValueError(f"{path}: no hosts defined")
     return entries
@@ -361,16 +380,18 @@ class CeruleanClient:
         return self.request("GET", "/api/npm/hosts") or []
 
     def upsert_host(self, domain: str, address: str, entry: HostEntry) -> str:
+        # A per-entry upstream overrides the LAN address; see HostEntry.host.
+        target = entry.host or address
         if self.dry_run:
             self.planned.append(
-                f"reconcile NPM host {domain} -> {address}:{entry.port}"
+                f"reconcile NPM host {domain} -> {target}:{entry.port}"
             )
             return "planned"
         for host in self.list_hosts():
             if domain not in [str(name).lower() for name in host.get("domain_names", [])]:
                 continue
             drifted = (
-                str(host.get("forward_host")) != address
+                str(host.get("forward_host")) != target
                 or int(host.get("forward_port") or 0) != entry.port
                 or str(host.get("forward_scheme") or "http") != "http"
                 or bool(host.get("allow_websocket_upgrade", host.get("websocket_support", True)))
@@ -379,11 +400,11 @@ class CeruleanClient:
             if not drifted:
                 return "unchanged"
             self.mutate(
-                f"update NPM host {domain} -> {address}:{entry.port}",
+                f"update NPM host {domain} -> {target}:{entry.port}",
                 "PUT",
                 f"/api/npm/hosts/{host['id']}",
                 {
-                    "forward_host": address,
+                    "forward_host": target,
                     "forward_port": entry.port,
                     "forward_scheme": "http",
                     "ssl_forced": True,
@@ -393,12 +414,12 @@ class CeruleanClient:
             )
             return "updated"
         self.mutate(
-            f"create NPM host {domain} -> {address}:{entry.port}",
+            f"create NPM host {domain} -> {target}:{entry.port}",
             "POST",
             "/api/npm/hosts",
             {
                 "domain": domain,
-                "forward_host": address,
+                "forward_host": target,
                 "forward_port": entry.port,
                 "forward_scheme": "http",
                 "ssl_forced": True,
@@ -554,7 +575,8 @@ def main() -> int:
             for entry in entries:
                 domain = f"{entry.subdomain}.{base_domain}"
                 action = client.upsert_host(domain, forward_host, entry)
-                print(f"NPM {domain} -> {forward_host}:{entry.port}: {action}")
+                target = entry.host or forward_host
+                print(f"NPM {domain} -> {target}:{entry.port}: {action}")
         else:
             print("NPM: skipped")
 

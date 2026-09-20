@@ -237,28 +237,48 @@ make cerulean-provision
 
 The checked-in map at `infra/cerulean/hosts.conf` provisions:
 
-| Hostname                     | DNS A record | NPM upstream    |
-| ---------------------------- | ------------ | --------------- |
-| `app.signara.innotel.us`     | WAN IP       | LAN IP `:3000`  |
-| `api.signara.innotel.us`     | WAN IP       | LAN IP `:8000`  |
-| `auth.signara.innotel.us`    | WAN IP       | LAN IP `:9100`  |
-| `admin.signara.innotel.us`   | WAN IP       | LAN IP `:81`    |
-| `storage.signara.innotel.us` | WAN IP       | docker0 `:2090` |
+| Hostname                       | DNS A record | NPM upstream                |
+| ------------------------------ | ------------ | --------------------------- |
+| `app.signara.innotel.us`       | WAN IP       | LAN IP `:3000`              |
+| `api.signara.innotel.us`       | WAN IP       | LAN IP `:8002`              |
+| `auth.signara.innotel.us`      | WAN IP       | LAN IP `:9000`              |
+| `admin.signara.innotel.us`     | WAN IP       | `127.0.0.1:4180` (SSO gate) |
+| `storage.signara.innotel.us`   | WAN IP       | LAN IP `:2090`              |
+| `subscribe.signara.innotel.us` | WAN IP       | LAN IP `:3040`              |
+
+Every upstream here has to stay equal to what the host actually binds, because
+a re-provision rewrites the edge to match this file — it is not documentation,
+it is input. The API's port is `8002`, not `8000`: `:8000` belongs to the voice
+plane (`dograh-api`) on this host, and the API itself binds `8002`
+(`API_BIND_PORT` in `.env`). `auth` is Cerulean's Authentik on `:9000`, not this
+stack's profile-gated `authentik` service (which would be `:9100`); the
+federated posture puts identity in the trust layer, so the edge points there.
+`admin` is NPM's own administration UI behind Cerulean's SSO gate —
+oauth2-proxy on `127.0.0.1:4180` — which is why that entry is the one that names
+its own `upstream-host`: the LAN address cannot reach loopback, and pointing the
+door at `:81` would serve the raw admin UI with the gate removed.
 
 `storage` backs the browser-facing presigned document URLs (`S3_PUBLIC_ENDPOINT`),
-served by the estate's `onyx-objectstore`. It is reached on the docker0 gateway
-(`172.17.0.1:2090`) because the store is deliberately not published on the LAN —
-only the loopback address and the bridge gateway answer. It needs no WebSocket
-support, so its `hosts.conf` entry is flagged `no`.
+served by the estate's `onyx-objectstore`, reached on the host's LAN address
+`:2090`. `subscribe` is served under this zone but owned by `ips`, so it is
+listed only so provisioning leaves it correct rather than guessing.
 
 On every normal provisioning run, Cerulean redetects and validates the current
 public WAN IPv4, persists it as `CERULEAN_WAN_IP`, and uses it for DNS. Cerulean
 then registers or reuses the `innotel.us` zone, removes prior A/CNAME
-records at the five exact Signara hostnames, creates exactly one WAN A record
-per host, creates or updates the NPM hosts with LAN upstreams, and issues or
+records at the six exact Signara hostnames, creates exactly one WAN A record
+per host, creates or updates the NPM hosts with the upstreams above (a per-entry
+`upstream-host` overriding `CERULEAN_LAN_IP`), and issues or
 reuses the `*.signara.innotel.us` wildcard certificate. Unrelated records in
 `innotel.us` are never removed. Certificate renewal and NPM attachment remain
 managed by Cerulean.
+
+**Before trusting a provisioning run, dry-run it against the deployment:**
+`python3 infra/cerulean/provision.py --dotenv .env --dry-run` must print
+`unchanged` for every host. If it prints `update` or `create`, the map disagrees
+with the live edge — fix the map, not the reflex to re-run it. `make
+cerulean-provision` and `CERULEAN_AUTO_PROVISION=true` (which `setup.sh`
+honours) both apply it for real.
 
 ## 3. Legacy direct NGINX automation
 
@@ -272,13 +292,13 @@ The automation at `infra/nginx/npm-proxy-hosts.py` creates or updates proxy
 hosts and can request the wildcard certificate. Run it directly or through
 `./setup.sh --with-nginx`.
 
-| Hostname                     | Backend                                                |
-| ---------------------------- | ------------------------------------------------------ |
-| `app.signara.innotel.us`     | web `:3000`                                            |
-| `api.signara.innotel.us`     | api `:8000`                                            |
-| `auth.signara.innotel.us`    | Authentik host port `:9100` (container port `:9000`)   |
-| `admin.signara.innotel.us`   | NPM admin UI or administration app                     |
-| `storage.signara.innotel.us` | onyx-objectstore `172.17.0.1:2090` (container `:9000`) |
+| Hostname                     | Backend                                                   |
+| ---------------------------- | --------------------------------------------------------- |
+| `app.signara.innotel.us`     | web `:3000`                                               |
+| `api.signara.innotel.us`     | api `:8002` (`API_BIND_PORT`; `:8000` is the voice plane) |
+| `auth.signara.innotel.us`    | Cerulean's Authentik `:9000`                              |
+| `admin.signara.innotel.us`   | NPM admin UI behind the SSO gate (`127.0.0.1:4180`)       |
+| `storage.signara.innotel.us` | onyx-objectstore `:2090` (container `:9000`)              |
 
 ```bash
 export NPM_API_URL=http://<npm-host>:81

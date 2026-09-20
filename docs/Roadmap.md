@@ -221,13 +221,42 @@ what is owed to users in place of the history.
 ### W5 — Edge, delivery and certificates (P4 — mostly done)
 
 - [x] `sign.innotel.us` serves Signara; `CORS_ORIGINS` includes it.
-- [ ] Trim or confirm the alias set (`app.`, `api.`, `auth.`, `storage.signara.innotel.us`) — every
-      extra public name is another door to keep gated and certified.
-- [ ] Certificates: confirm the zone's wildcard covers every name above and that
-      the ACME DNS-01 path still runs through Cerulean/Technitium.
-- [ ] Mail: keep `MAILGUN_SENDER`/SMTP identity stable and verify SPF/DKIM/DMARC
-      for the signing domain _before_ anything else changes — completion emails are
-      the product's most visible surface.
+- [x] **The alias set is measured, and provisioning now agrees with it — 2026-09-20.**
+      Read live (the Technitium zone and the NPM hosts), the zone serves exactly
+      **eight** names: `signara.innotel.us` (root), and `app`, `api`, `auth`,
+      `admin`, `storage`, `subscribe` under `*.signara.innotel.us`, plus
+      `sign.innotel.us` on the parent wildcard. All eight are one WAN IP and one
+      certificate pair. `admin` is NPM's own administration UI behind Cerulean's
+      SSO gate (`127.0.0.1:4180`), not a Signara app; `subscribe` is served in
+      this zone but owned by `ips` (its subscribe service on `:3040`) and belongs
+      under its own label if the estate ever trims public names. Both are kept,
+      and both are now written down in `docs/Deployment.md` §2.
+      **The dangerous finding was not the name set but the provisioning input.**
+      `infra/cerulean/hosts.conf` had drifted from the deployment, so
+      `make cerulean-provision` — and `CERULEAN_AUTO_PROVISION=true`, which the
+      live `.env` sets and `setup.sh` honours — would have rewritten the edge to
+      `api :8000` (the voice plane, `dograh-api`), `auth :9100` (nothing
+      listening), `storage :9002` (the retired MinIO) and `admin :81` (**the raw
+      NPM admin UI, with the gate removed**). A config typo that takes the edge
+      down, not a documentation slip. All four corrected: the map now matches the
+      live edge port-for-port, and the admin door's loopback upstream is
+      expressible (`HostEntry.host` in `provision.py`) instead of being
+      unrepresentable.
+- [x] **Certificates verified live — 2026-09-20.** The `*.signara.innotel.us` and
+      `*.innotel.us` wildcards are valid to 2026-12-14 and cover every name above;
+      each name is served with the expected SAN. The ACME path is DNS-01 through
+      Cerulean/Technitium (`_acme-challenge` records) — that is what issued them,
+      and it is still the path renewal takes (`CERULEAN_RENEW_DAYS=30`).
+- [ ] **Mail: there is no path at all — this is not a deliverability check.**
+      `SMTP_HOST` is empty in the live `.env`, so `EmailService.isConfigured()` is
+      false, every invite, reminder and completion mail is skipped, and the worker
+      records the notification `SENT` rather than `DELIVERED` — so nothing
+      surfaces it. "Verify SPF/DKIM/DMARC" was the wrong question: no relay is
+      configured anywhere in the estate, outbound port 25 is blocked, and no SMTP
+      credentials exist. The signing domain's mail is therefore **unauthenticated
+      _and_ undelivered**, and completion email is the product's most visible
+      surface. Remaining: choose a relay, set `SMTP_*` and `ALERT_EMAIL_TO`, then
+      publish SPF/DKIM/DMARC for `signara.innotel.us`.
 - [x] Re-point anything still describing "sign-platform" in docs/comments — **done
       2026-09-19**: an estate-wide audit found no live references outside the
       retirement record itself, and the `sign` repo's forward-looking claims (README,
@@ -235,7 +264,12 @@ what is owed to users in place of the history.
       Findings in `1-primary/sign/ARCHIVE.md` §7.
 
 **Exit:** one documented public name set, valid certs, mail authenticated, no
-stale references.
+stale references. **Met except mail:** the name set is measured and preserved by
+provisioning, the certs are valid and announced, and the references are gone —
+but mail has no path yet, so "mail authenticated" is the one open clause. Two
+names remain outside this map by construction — the zone root `signara.innotel.us`
+and `sign.innotel.us` serve traffic but are not subdomains of `CERULEAN_BASE_DOMAIN`,
+so `provision.py` cannot express them; they are managed by Cerulean directly.
 
 ### W6 — Operations (P5)
 
