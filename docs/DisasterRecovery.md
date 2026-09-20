@@ -34,11 +34,36 @@ are reported separately: `signara_backup_last_success_timestamp` says a backup r
 `signara_backup_mirror_offhost` says that copy is on another machine — the only one
 of the three that answers the question, and the one with the alert.
 
-**Posture as of 2026-09-20: the mirror is configured and working — `BACKUP_S3_*`
-points at ONYX's object store and `BACKUP_REQUIRE_REMOTE=true` makes a missing
-mirror fail the run — but it fails the off-host test on purpose, because ONYX runs
-on the deployment host itself. `signara_backup_mirror_offhost` is 0 and
-`BackupIsLocalOnly` keeps firing; that alert is the remaining work, not a bug.**
+**Posture as of 2026-09-20: the mirror is configured, working, and on another
+host.** `BACKUP_S3_*` points at a dedicated `onyx-objectstore` on `192.168.1.10`
+(host `onyx`), reachable on `:2091`; `BACKUP_REQUIRE_REMOTE=true` makes a missing
+mirror fail the run; and `signara_backup_mirror_offhost` reads **1** — the mirror
+resolves to an address outside `BACKUP_LOCAL_ADDRESSES=192.168.1.46` — so
+`BackupIsLocalOnly` clears.
+
+It is a **dedicated** store, deliberately not `.10`'s existing `onyx-e2e` object
+store on `:2090`. That one keeps its objects in the docker named volume
+`onyx-e2e_onyx-objectstore-state` and authenticates with the checked-in
+`onyx-e2e-access` / `onyx-e2e-secret-not-a-real-key` pair, so a routine
+`docker compose down -v` would delete every backup and anything with the
+repository could read them — an off-host copy that dies with a dev teardown is
+worse than none, because it reports green. The backup store writes to the host
+path `/srv/signara-backup-store` (a bind mount, not a volume) with its own
+credentials, so tearing the e2e stack down does not touch it.
+
+**The mirror's own retention was silently broken until 2026-09-20, and the fix is
+the trailing `/` in `backup.sh`.** Every run since 02:15 logged three
+`can't limit to single files when using filters` errors and pruned nothing. The
+cause is in the store, not the client: `onyx-objectstore` answers **`200` to
+`HEAD /bucket/<prefix>`** for a key that does not exist, because a prefix is a
+directory on disk and the handler only `stat`s the path — it never requires a
+regular file (`onyx/services/objectstore/http.go`, the `MethodHead` case of
+`s3Object`). rclone probes with HEAD to decide file-vs-directory, concludes
+`bucket/postgres` is a file, and refuses `--min-age` on a single file. Each leg is
+`|| true`, so the mirror grew without bound instead of failing. Pruning with the
+directory form (`$mirror/$prefix/`) is unambiguous and works against any S3
+store; the store's HEAD is still wrong for every other client and is written up
+for the ONYX repository.
 
 **Off-host is decided by `signara_backup_mirror_offhost`, not by
 `remote_enabled`.** "A mirror is configured" and "the mirror is somewhere else"
@@ -123,14 +148,18 @@ a plan:
 | 2026-09-20 | Dump mode against a non-Signara dump                                                                                                                                                                                   | **Refused, as intended** — fails with "carries no Organization table data" instead of reporting a clean restore                                                                                                                                             |
 | 2026-09-20 | **Production dump, fetched from the ONYX mirror with `rclone`, drilled on the deployment host** (`db-20260920T021617Z.dump`, 118 848 bytes, `sha256 f2d4b983a9e065d73971ebfbcc17c6c891b1e60c3ae0405dc554058335019fec`) | **PASS** — 33 table-data entries restored into a throwaway Postgres, `_prisma_migrations` intact, content 3 organizations / 3 users / 12 documents / 105 audit rows. The mirror is therefore not just receiving bytes: a dump read back out of it restores. |
 
+| 2026-09-20 | **Off-host mirror, verified on `.10`** — `BACKUP_S3_*` repointed to the dedicated store on `192.168.1.10:2091` and the backup re-run (40 objects mirrored: both database dumps and the document archive) | **PASS** — the objects are on `.10`'s disk at `/srv/signara-backup-store/objects/signara-backups/…` (**a bind mount, not a docker volume**), and `signara_backup_mirror_offhost` reads 1 in Prometheus. |
+
 **What this does not prove.** The production drill above restores real data from
-the mirror, so the restore path and the dump are measured rather than assumed. It
-does **not** prove durability: the mirror lives on the same host as the database,
-so the failure it protects against is a lost or corrupted object, a bad delete, or
-a botched upgrade — not losing the machine. Workstream W6 stays open on exactly
-one item: a mirror on another host (with `BACKUP_LOCAL_ADDRESSES` naming this one)
-until `signara_backup_mirror_offhost` reads 1 and `BackupIsLocalOnly` clears. Until
-then the RTO of ≤ 4 h is an estimate for anything that takes the host with it.
+the mirror, so the restore path and the dump are measured rather than assumed.
+Two limits remain, and they are narrower than they were. The mirror is now on
+another machine, so losing this host no longer loses the data — that is the
+failure the estate actually suffered. But `192.168.1.10` is on the same LAN, so
+it does not survive the site going away, and it is a development host: the store
+is durable (a host bind mount, not a volume), but the box is not provisioned as a
+backup target. A mirror off-site is therefore the next durability step, not a
+restatement of this one, and until it exists the RTO of ≤ 4 h is an estimate for
+anything that takes the LAN with it.
 
 - **Monthly**: `.github/workflows/restore-drill.yml` runs seed mode on the first
   of the month and keeps its log as an artifact, so the path cannot rot quietly
@@ -247,8 +276,28 @@ keeps its own credentials throughout.
    `BACKUP_S3_BUCKET`, `BACKUP_S3_ACCESS_KEY` and `BACKUP_S3_SECRET_KEY` at a store
    on a different host, keep `BACKUP_REQUIRE_REMOTE=true` so a missing mirror
    fails the run rather than downgrading it, and recreate the backup service.
-   Credentials to copy, not guess: in this estate ONYX's own `.env` holds
-   `vault://` references rather than keys, so use the literal ones the API holds.
+   The current target is the dedicated store on `192.168.1.10:2091`; its
+   credentials are the literal pair in `/root/signara-backup-store.{access,secret}`
+   **on `.10`**, not `vault://` references from an ONYX `.env`.
+
+### The mirror is not pruning (mirror grows without bound)
+
+The mirror has its own retention, applied per prefix at the end of `backup.sh`.
+If the backup log repeats `can't limit to single files when using filters` for
+`minio`, `postgres` or `authentik`, the prune is a no-op and the mirror keeps
+every archived day. Each leg is `|| true`, so the run still reports success — read
+the log, not the status. It used to be caused by the path being written without a
+trailing `/` (a key prefix that HEAD answers `200` for looks like a file to
+rclone); see §2. Confirm the fix with a dry run before trusting it:
+
+```bash
+docker compose -f docker-compose.prod.yml -f docker-compose.override.prod.yml \
+  exec backup rclone --config /dev/null --s3-provider Other \
+  --s3-endpoint "$BACKUP_S3_ENDPOINT" --s3-access-key-id "$BACKUP_S3_ACCESS_KEY" \
+  --s3-secret-access-key "$BACKUP_S3_SECRET_KEY" --s3-force-path-style \
+  delete --min-age 30d --dry-run ":s3:$BACKUP_S3_BUCKET/postgres/"
+```
+
 4. Confirm the mirror actually holds the archive before trusting it, then run
    `scripts/restore-drill.sh` against a dump fetched from that store — the point
    of the mirror is that the restore path works from it, not that bytes arrived.

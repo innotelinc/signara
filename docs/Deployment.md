@@ -194,7 +194,10 @@ database it protects. Whether that mirror is _somewhere else_ is what
 `remote_enabled` says only that credentials were configured, and a mirror on the
 same host reads as a success while adding no durability. Off-host is proven rather
 than assumed: the job resolves the mirror endpoint and compares it against
-`BACKUP_LOCAL_ADDRESSES`, which has to list this host's addresses. Object
+`BACKUP_LOCAL_ADDRESSES`, which has to list this host's addresses. This deployment
+mirrors to a dedicated `onyx-objectstore` on `192.168.1.10:2091`, whose storage is
+a host bind mount — a target inside a docker named volume (an `e2e` store) would
+be deleted by the next `down -v` while still reporting green. Object
 transfers to and from the mirror use `rclone`, because ONYX refuses the streaming
 SigV4 payloads `mc` sends for every PUT. Verify durability with
 `scripts/restore-drill.sh` (Docker-only, non-destructive — it uses its own
