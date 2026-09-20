@@ -22,7 +22,21 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        service: [api, web]
+        include:
+          - service: api
+            build_args: ''
+          - service: web
+            # The web bundle is *built*, not runtime-configured: NEXT_PUBLIC_*
+            # is inlined into the client at build time. Building without these
+            # silently bakes the Dockerfile's http://localhost defaults into
+            # the published image, so the deployed login link and every API
+            # call point at localhost and the signing room cannot open a
+            # session. Keep the fallbacks in step with the production defaults
+            # in docker-compose.prod.yml; set the API_URL/WEB_URL repository
+            # variables to publish for a different deployment.
+            build_args: |
+              NEXT_PUBLIC_API_URL=${{ vars.API_URL || 'https://api.signara.innotel.us' }}
+              NEXT_PUBLIC_WEB_URL=${{ vars.WEB_URL || 'https://app.signara.innotel.us' }}
     steps:
       - uses: actions/checkout@v7
 
@@ -56,6 +70,7 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: ${{ matrix.build_args }}
           cache-from: type=gha,scope=${{ matrix.service }}
           cache-to: type=gha,mode=max,scope=${{ matrix.service }}
           provenance: mode=max
