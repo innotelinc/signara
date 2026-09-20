@@ -9,16 +9,16 @@
 
 ## 1. Status at a glance
 
-| | State | Evidence |
-|---|---|---|
-| **Signara (target)** | Running, healthy | `signara-{api,frontend,postgres,redis,minio,meilisearch}` up, api + frontend healthy |
-| **`sign.innotel.us`** | **Serves Signara** since 2026-09-15 | NPM host retargeted to `192.168.1.46:3000`; legacy `/api/` location dropped |
-| **Sign Platform (OpenSign fork)** | **Gone, not merely retired** | `192.168.1.11` answers no ICMP and nothing on `:3000`, `:8080`, `:27017`; no `sign-platform*` container or volume exists on this host |
-| **Legacy data** | **Presumed lost — unverified** | The backup script lived only on `.11` (`/usr/local/bin/sign-platform-backup.sh`), was never committed to the repo, and no archive exists on this host. §6 |
-| **Storage** | **onyx-objectstore; MinIO demoted to rollback** | API reads the `SIGNARA_S3_*` profile; 12 objects migrated and hash-verified; `signara-minio-1` stopped, `--profile legacy-storage` brings it back |
-| **Onyx object store** | **SigV4, deployed, and pinned to AWS's published vectors** | `services/objectstore/sigv4.go` verifies `AWS4-HMAC-SHA256` header auth *and* presigned URLs; `sigv4_test.go` pins the key derivation to the published AWS vector. `storage.contract.spec.ts` runs put → stat → presign → fetch → delete through minio-js against a standalone build: **6/6** (2026-09-15). HTTP Basic is still accepted so an existing deployment survives the upgrade |
-| **Identity** | Authentik-native, OIDC-only | `auth` module exposes `login`/`callback`/`refresh`/`logout`/`me` — **no password endpoint exists** (the posture the rest of the estate was moved to today) |
-| **Sign-in test** | Passing | `scripts/verify-sso.py` — member signs in and `/auth/me` names them; an outsider is refused by the application's group binding; no password endpoint |
+|                                   | State                                                      | Evidence                                                                                                                                                                                                                                                                                                                                                                                |
+| --------------------------------- | ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Signara (target)**              | Running, healthy                                           | `signara-{api,frontend,postgres,redis,minio,meilisearch}` up, api + frontend healthy                                                                                                                                                                                                                                                                                                    |
+| **`sign.innotel.us`**             | **Serves Signara** since 2026-09-15                        | NPM host retargeted to `192.168.1.46:3000`; legacy `/api/` location dropped                                                                                                                                                                                                                                                                                                             |
+| **Sign Platform (OpenSign fork)** | **Gone, not merely retired**                               | `192.168.1.11` answers no ICMP and nothing on `:3000`, `:8080`, `:27017`; no `sign-platform*` container or volume exists on this host                                                                                                                                                                                                                                                   |
+| **Legacy data**                   | **Presumed lost — unverified**                             | The backup script lived only on `.11` (`/usr/local/bin/sign-platform-backup.sh`), was never committed to the repo, and no archive exists on this host. §6                                                                                                                                                                                                                               |
+| **Storage**                       | **onyx-objectstore; MinIO demoted to rollback**            | API reads the `SIGNARA_S3_*` profile; 12 objects migrated and hash-verified; `signara-minio-1` stopped, `--profile legacy-storage` brings it back                                                                                                                                                                                                                                       |
+| **Onyx object store**             | **SigV4, deployed, and pinned to AWS's published vectors** | `services/objectstore/sigv4.go` verifies `AWS4-HMAC-SHA256` header auth _and_ presigned URLs; `sigv4_test.go` pins the key derivation to the published AWS vector. `storage.contract.spec.ts` runs put → stat → presign → fetch → delete through minio-js against a standalone build: **6/6** (2026-09-15). HTTP Basic is still accepted so an existing deployment survives the upgrade |
+| **Identity**                      | Authentik-native, OIDC-only                                | `auth` module exposes `login`/`callback`/`refresh`/`logout`/`me` — **no password endpoint exists** (the posture the rest of the estate was moved to today)                                                                                                                                                                                                                              |
+| **Sign-in test**                  | Passing                                                    | `scripts/verify-sso.py` — member signs in and `/auth/me` names them; an outsider is refused by the application's group binding; no password endpoint                                                                                                                                                                                                                                    |
 
 **One sentence:** the cutover already happened — Signara serves the public URL — so
 the remaining work is not "move off OpenSign", it is "finish Signara": close the
@@ -28,8 +28,8 @@ it.
 
 ## 2. What "converged" means
 
-Per the federation rule — *Cerulean owns trust, Onyx owns storage, Magnate owns
-revenue, NPM Edge owns the edge* — convergence is complete when:
+Per the federation rule — _Cerulean owns trust, Onyx owns storage, Magnate owns
+revenue, NPM Edge owns the edge_ — convergence is complete when:
 
 1. Signara is the **only** e-signature stack; no `sign-platform` repo, image,
    volume, DNS name, proxy host or document reference survives. (The `sign`
@@ -49,34 +49,36 @@ revenue, NPM Edge owns the edge* — convergence is complete when:
 Each workstream has an exit criterion that can be checked, not judged.
 
 ### W1 — Identity & tenancy (P1)
+
 Authentik-native identity is in place; what is missing is the estate-level
 proof and the tenant model's edges.
 
 - [x] `scripts/verify-sso.py` in the signara repo (**done 2026-09-15**),
-  modelled on the three zone tests committed the same day (cerulean / capstone /
-  monarch). It drives the API's real flow — `GET /api/v1/auth/login` → Authentik
-  → `GET /api/v1/auth/callback` → refresh cookie → bearer → `/api/v1/auth/me` —
-  asserts the callback bound the flow with `signara_oidc_state` and issued both
-  auth cookies, asserts an identity outside the bound `Signara` group is refused
-  at authorization, and asserts there is no password endpoint. Exit codes 0/1/2.
-  The token it needs to mint identities comes from Cerulean's `.env` (the trust
-  layer) unless `AUTHENTIK_BOOTSTRAP_TOKEN` is set, overridable with
-  `AUTHENTIK_ENV_FILE`.
+      modelled on the three zone tests committed the same day (cerulean / capstone /
+      monarch). It drives the API's real flow — `GET /api/v1/auth/login` → Authentik
+      → `GET /api/v1/auth/callback` → refresh cookie → bearer → `/api/v1/auth/me` —
+      asserts the callback bound the flow with `signara_oidc_state` and issued both
+      auth cookies, asserts an identity outside the bound `Signara` group is refused
+      at authorization, and asserts there is no password endpoint. Exit codes 0/1/2.
+      The token it needs to mint identities comes from Cerulean's `.env` (the trust
+      layer) unless `AUTHENTIK_BOOTSTRAP_TOKEN` is set, overridable with
+      `AUTHENTIK_ENV_FILE`.
 - [ ] Confirm there is no break-glass password path in the web app (the API has
-  none — check the Next.js auth routes route through the API only).
+      none — check the Next.js auth routes route through the API only).
 - [ ] Role model: `Organization → Workspace → Team` exists in Prisma
-  (`Organization`, `Membership`, `Workspace`, `WorkspaceMember`, `Team`,
-  `Role`, `Permission`); decide the **operator** view vs the **tenant** view and
-  document the mapping to Authentik groups.
+      (`Organization`, `Membership`, `Workspace`, `WorkspaceMember`, `Team`,
+      `Role`, `Permission`); decide the **operator** view vs the **tenant** view and
+      document the mapping to Authentik groups.
 - [ ] Decide whether signers (external, unauthenticated parties) are ever
-  Authentik users. Today they are **token-bearing guests** (`POST /signatures/public/:token/sign`,
-  web route `/sign/[token]`) — that is the right model; record it so nobody
-  "fixes" it later.
+      Authentik users. Today they are **token-bearing guests** (`POST /signatures/public/:token/sign`,
+      web route `/sign/[token]`) — that is the right model; record it so nobody
+      "fixes" it later.
 
 **Exit:** the verify script passes in CI/locally, and the guest-vs-user boundary
 is written down in `docs/Security.md`.
 
 ### W2 — Feature parity with OpenSign (P1)
+
 The old platform is gone, so parity is now about **not losing a capability a
 user may still expect**, not about running two systems in parallel. The
 checklist below is a starting inventory taken from the API surface on
@@ -92,25 +94,25 @@ harvested from the fork on 2026-09-20 before it was frozen: the field vocabulary
 completion mail subjects and bodies #83 has to keep, and the certificate layout
 #84 has to match. Nothing in it is a code port — only what a user saw.
 
-| Capability | Evidence in Signara today | Gap to close |
-|---|---|---|
-| Upload / versions / download | `documents` controller: `upload`, `:id`, `:id/download`, `:id/versions` | — |
-| Templates + fields | `templates` module; web `/templates`, `/templates/new`, `/templates/[id]`; `TemplateField` model | verify field placement editor covers all OpenSign field types |
-| Send for signature (sequential/parallel) | `signatures`: `POST /requests`, `GET /requests`, `:id/cancel`, `:id/remind`, `:id/evidence` | — |
-| Guest signing without an account | `/sign/[token]`, `POST /signatures/public/:token/sign` | — |
-| Reminders / escalation | `:id/remind`, `WorkflowRule` | scheduled/automatic reminders (OpenSign had a schedule) |
-| Completion email | `mailer` module + `email-templates.ts`; `Notification` model | keep the sender identity so deliverability doesn't regress |
-| Audit trail | `SignatureEvent` + `AuditLog`; `GET /audit/export` | — |
-| Certificate of completion / evidence | `certificates` module (`provision`, `verify`, `revoke`, `:id`), `GET /signatures/requests/:id/evidence` | confirm the certificate layout matches what signers were shown before |
-| API for integrators | `api-keys` module, `openapi/` | **outbound webhooks** — only mailer/signature internals reference the word today, so integrators (n8n and friends) have nothing to subscribe to |
-| Bulk send | — | **no bulk endpoint**; OpenSign had one. Deliberate or not, decide |
-| Branding per tenant | `Setting` model, `organizations` module | per-org logo/sender templates |
-| In-person signing | — | decide: needed for the self-hosted use case, or explicitly out of scope |
-| Cloud-storage imports (Drive/Dropbox/OneDrive) | — | decide; Onyx is the destination, so these are *sources* only |
-| SMS / WhatsApp delivery | — | decide; email-only is defensible, but say so |
-| i18n | `public/locales/` with 7 catalogs (de, en, es, fr, hi, it, kr) harvested from the retired fork, wired through `web/src/lib/i18n/` | the harvested catalogs describe OpenSign's screens, not Signara's newer ones — extract the remaining strings into keys as screens are touched |
-| Billing | `billing` module (`plans`, `subscriptions`, `invoices`, `usage`) | align with Magnate as the revenue owner (the estate rule) rather than a second billing system |
-| Admin/ops view | `admin`: orgs, users, status, `metrics` | — |
+| Capability                                     | Evidence in Signara today                                                                                                         | Gap to close                                                                                                                                    |
+| ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| Upload / versions / download                   | `documents` controller: `upload`, `:id`, `:id/download`, `:id/versions`                                                           | —                                                                                                                                               |
+| Templates + fields                             | `templates` module; web `/templates`, `/templates/new`, `/templates/[id]`; `TemplateField` model                                  | verify field placement editor covers all OpenSign field types                                                                                   |
+| Send for signature (sequential/parallel)       | `signatures`: `POST /requests`, `GET /requests`, `:id/cancel`, `:id/remind`, `:id/evidence`                                       | —                                                                                                                                               |
+| Guest signing without an account               | `/sign/[token]`, `POST /signatures/public/:token/sign`                                                                            | —                                                                                                                                               |
+| Reminders / escalation                         | `:id/remind`, `WorkflowRule`                                                                                                      | scheduled/automatic reminders (OpenSign had a schedule)                                                                                         |
+| Completion email                               | `mailer` module + `email-templates.ts`; `Notification` model                                                                      | keep the sender identity so deliverability doesn't regress                                                                                      |
+| Audit trail                                    | `SignatureEvent` + `AuditLog`; `GET /audit/export`                                                                                | —                                                                                                                                               |
+| Certificate of completion / evidence           | `certificates` module (`provision`, `verify`, `revoke`, `:id`), `GET /signatures/requests/:id/evidence`                           | confirm the certificate layout matches what signers were shown before                                                                           |
+| API for integrators                            | `api-keys` module, `openapi/`                                                                                                     | **outbound webhooks** — only mailer/signature internals reference the word today, so integrators (n8n and friends) have nothing to subscribe to |
+| Bulk send                                      | —                                                                                                                                 | **no bulk endpoint**; OpenSign had one. Deliberate or not, decide                                                                               |
+| Branding per tenant                            | `Setting` model, `organizations` module                                                                                           | per-org logo/sender templates                                                                                                                   |
+| In-person signing                              | —                                                                                                                                 | decide: needed for the self-hosted use case, or explicitly out of scope                                                                         |
+| Cloud-storage imports (Drive/Dropbox/OneDrive) | —                                                                                                                                 | decide; Onyx is the destination, so these are _sources_ only                                                                                    |
+| SMS / WhatsApp delivery                        | —                                                                                                                                 | decide; email-only is defensible, but say so                                                                                                    |
+| i18n                                           | `public/locales/` with 7 catalogs (de, en, es, fr, hi, it, kr) harvested from the retired fork, wired through `web/src/lib/i18n/` | the harvested catalogs describe OpenSign's screens, not Signara's newer ones — extract the remaining strings into keys as screens are touched   |
+| Billing                                        | `billing` module (`plans`, `subscriptions`, `invoices`, `usage`)                                                                  | align with Magnate as the revenue owner (the estate rule) rather than a second billing system                                                   |
+| Admin/ops view                                 | `admin`: orgs, users, status, `metrics`                                                                                           | —                                                                                                                                               |
 
 **Exit:** every row is either **shipped**, **decided out of scope with a reason**,
 or **scheduled** — nothing is "unknown". Status: 6 rows shipped (upload,
@@ -119,6 +121,7 @@ versions, download; send for signature; guest signing; audit trail; admin/ops),
 signing, cloud-storage import, SMS/WhatsApp), plus the billing question in §8.
 
 ### W3 — Storage onto Onyx (P2, the one hard blocker)
+
 Onyx v0.1's object store authenticated with HTTP Basic only, which no S3 SDK
 speaks — so Signara's MinIO client could not talk to it, and presigned URLs,
 which is how a browser fetches a document without the API proxying every byte,
@@ -132,7 +135,7 @@ were impossible. Both tracks of this workstream are now landed:
   enforces a 15-minute clock skew and the `X-Amz-Expires` window, and refuses a
   request whose declared `SignedHeaders` are not all present. HTTP Basic is
   kept, so an existing deployment survives the upgrade — but a request that
-  *claims* SigV4 never falls back to it, which `sigv4_test.go` asserts. The
+  _claims_ SigV4 never falls back to it, which `sigv4_test.go` asserts. The
   signing-key derivation is pinned to the worked example published by AWS, so a
   failure names the primitive rather than the request.
   Landed upstream in Onyx, so this unblocks every S3-shaped consumer in the
@@ -140,7 +143,7 @@ were impossible. Both tracks of this workstream are now landed:
 - **Track B (de-risked) — done.** The driver is a supported `S3_*` profile
   (endpoint, public endpoint, keys, bucket, path-style, region), and
   `storage.contract.spec.ts` is the contract test: upload → stat (incl. the
-  checksum metadata) → presign → *fetch the presigned URL* → read back → delete,
+  checksum metadata) → presign → _fetch the presigned URL_ → read back → delete,
   run through minio-js so it exercises the real client rather than a stub. It is
   `S3_CONTRACT=1`-gated, so `npm test` stays hermetic.
 
@@ -153,7 +156,7 @@ check a download against the hash it uploaded.
 verified end to end:
 
 - The store was rebuilt from this tree and redeployed, so SigV4 exists in the
-  *running* container. Proven with the repo's own forward probe —
+  _running_ container. Proven with the repo's own forward probe —
   `scripts/onyx-s3-test.mjs`, written when SDK support was still a prediction and
   now passing — and with `storage.contract.spec.ts` against the deployed endpoint
   and its real credentials, 6/6, presigned fetch included.
@@ -174,7 +177,7 @@ read a bucket's top level and skipped directories, so every key containing `/` w
 invisible — and every key Signara writes is `<org>/documents/<uuid>.pdf`. The
 running store listed **1** object while holding **16**. Anything built on a
 listing — a backup, an inventory, an age-out sweep — would have omitted every
-document *without an error*. The listing is now recursive and honours
+document _without an error_. The listing is now recursive and honours
 `prefix`/`delimiter`, with `http_list_test.go` pinning it and the REST smoke test
 covering it end to end.
 
@@ -184,6 +187,7 @@ bucket from the URL, so it could never have passed; and `onyx-s3-test.mjs` was
 still labelled a probe that was expected to fail.
 
 ### W4 — Legacy history (P3, re-scoped)
+
 See §6. The ETL described in `CONVERGENCE.md` v1 (Mongo → Postgres, files →
 Onyx `legacy/sign-platform/`) is **only worth writing if the source exists**.
 
@@ -196,52 +200,60 @@ the sources checked and what each returned. No ETL will be written; see §6 for
 what is owed to users in place of the history.
 
 ### W5 — Edge, delivery and certificates (P4 — mostly done)
+
 - [x] `sign.innotel.us` serves Signara; `CORS_ORIGINS` includes it.
 - [ ] Trim or confirm the alias set (`app.`, `api.`, `auth.`, `storage.signara.innotel.us`) — every
-  extra public name is another door to keep gated and certified.
+      extra public name is another door to keep gated and certified.
 - [ ] Certificates: confirm the zone's wildcard covers every name above and that
-  the ACME DNS-01 path still runs through Cerulean/Technitium.
+      the ACME DNS-01 path still runs through Cerulean/Technitium.
 - [ ] Mail: keep `MAILGUN_SENDER`/SMTP identity stable and verify SPF/DKIM/DMARC
-  for the signing domain *before* anything else changes — completion emails are
-  the product's most visible surface.
+      for the signing domain _before_ anything else changes — completion emails are
+      the product's most visible surface.
 - [x] Re-point anything still describing "sign-platform" in docs/comments — **done
-  2026-09-19**: an estate-wide audit found no live references outside the
-  retirement record itself, and the `sign` repo's forward-looking claims (README,
-  `docs/stack.md`, the landing page) now say retired rather than "converging".
-  Findings in `1-primary/sign/ARCHIVE.md` §7.
+      2026-09-19**: an estate-wide audit found no live references outside the
+      retirement record itself, and the `sign` repo's forward-looking claims (README,
+      `docs/stack.md`, the landing page) now say retired rather than "converging".
+      Findings in `1-primary/sign/ARCHIVE.md` §7.
 
 **Exit:** one documented public name set, valid certs, mail authenticated, no
 stale references.
 
 ### W6 — Operations (P5)
-- [ ] **Backups that exist off the box:** the *mechanism* is in place and now
-  reports its own state — `signara_backup_remote_enabled` plus the
-  `BackupIsLocalOnly` alert, so "the job ran" and "the copy left the host" are no
-  longer the same signal — but **no target is configured as of 2026-09-20**, so
-  today's backups still die with the host. Remaining: point `BACKUP_S3_*` at a
-  store on another host (ONYX's object store is the estate's storage owner and is
-  S3-speaking) and set `BACKUP_REQUIRE_REMOTE=true`.
+
+- [ ] **Backups that exist off the box:** the job now runs on the deployment with
+      a working mirror — `BACKUP_S3_*` → ONYX's object store, `BACKUP_REQUIRE_REMOTE=true`,
+      the identity database included, all four metrics healthy as of 2026-09-20
+      (`status 1`, `remote_enabled 1`, `remote_last_success` fresh,
+      `identity_covered 1`) — **but it is the same host, so
+      `signara_backup_mirror_offhost` is 0 and `BackupIsLocalOnly` correctly keeps
+      alerting.** A second copy on the same machine protects against a bad delete, a
+      corrupted object or a botched upgrade; it does not protect against losing the
+      host. Remaining: a mirror on another host, with `BACKUP_LOCAL_ADDRESSES` naming
+      this one so the metric can prove it.
 - [x] **A restore drill, performed and recorded** — `scripts/restore-drill.sh`
-  (2026-09-20), run in both seed and dump mode, refused a non-Signara dump, and
-  recorded with its limits in `docs/DisasterRecovery.md` §4.
+      (2026-09-20): seed mode, dump mode, refusal of a non-Signara dump, and then a
+      **production dump fetched back out of the ONYX mirror and restored on the
+      deployment host** (3 organizations, 3 users, 12 documents, 105 audit rows).
+      Recorded with its limits in `docs/DisasterRecovery.md` §4.
 - [ ] Monitoring on the api/web/queue (the estate already runs SigNoz).
 - [ ] An upgrade path (Prisma migrations + image pinning) written down.
 
-**Exit:** the restore drill is a dated entry in the DR doc, not a plan — **met for
-the tooling**, still open for the deployment: the remainder is (1) a mirror on
-another host, and (2) one drill against a **production** dump, dated in the same
-table. Until those exist the RTO is an estimate rather than a measurement.
+**Exit:** the restore drill is a dated entry in the DR doc, not a plan — **met,
+including against a production dump on the deployment host.** What remains is
+durability rather than procedure: (1) the mirror has to leave this host, and (2)
+monitoring and the upgrade path below. Until the mirror is off-host, the RTO of
+≤ 4 h is an estimate for anything that takes the machine with it.
 
 ## 4. Phase plan
 
-| Phase | Scope | Status | Exit criteria |
-|---|---|---|---|
-| **P0 — Freeze legacy** | sign-platform stable fallback + backups | **Moot** — the host is gone; nothing to freeze | replaced by §6 recovery attempt |
-| **P1 — Parity** | W1 + W2 | **In progress** | every parity row shipped/decided/scheduled; verify script green |
-| **P2 — Onyx** | W3 | **Done 2026-09-15** — SigV4 shipped and deployed, 12 objects migrated and verified, MinIO demoted | a presigned fetch through the edge returns the recorded checksum with MinIO stopped |
-| **P3 — Migration** | W4 | **Conditional on §6** | counts reconcile *or* a recorded write-off |
-| **P4 — Cutover** | W5 | **Done** (2026-09-15) | signers sign on Signara at `sign.innotel.us` |
-| **P5 — Retire legacy** | archive the `sign` repo, drop dead DNS/proxy hosts, final doc pass | **In progress** (2026-09-19 inventory, 2026-09-20 harvest) — locales harvested, the parity reference written (`docs/OpenSignParity.md`), duplicated tooling re-verified at the frozen tip, stale docs frozen, the image-publishing workflow gated; tag + GitHub archive are operator actions | nothing in the estate refers to OpenSign except history |
+| Phase                  | Scope                                                              | Status                                                                                                                                                                                                                                                                                       | Exit criteria                                                                       |
+| ---------------------- | ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| **P0 — Freeze legacy** | sign-platform stable fallback + backups                            | **Moot** — the host is gone; nothing to freeze                                                                                                                                                                                                                                               | replaced by §6 recovery attempt                                                     |
+| **P1 — Parity**        | W1 + W2                                                            | **In progress**                                                                                                                                                                                                                                                                              | every parity row shipped/decided/scheduled; verify script green                     |
+| **P2 — Onyx**          | W3                                                                 | **Done 2026-09-15** — SigV4 shipped and deployed, 12 objects migrated and verified, MinIO demoted                                                                                                                                                                                            | a presigned fetch through the edge returns the recorded checksum with MinIO stopped |
+| **P3 — Migration**     | W4                                                                 | **Conditional on §6**                                                                                                                                                                                                                                                                        | counts reconcile _or_ a recorded write-off                                          |
+| **P4 — Cutover**       | W5                                                                 | **Done** (2026-09-15)                                                                                                                                                                                                                                                                        | signers sign on Signara at `sign.innotel.us`                                        |
+| **P5 — Retire legacy** | archive the `sign` repo, drop dead DNS/proxy hosts, final doc pass | **In progress** (2026-09-19 inventory, 2026-09-20 harvest) — locales harvested, the parity reference written (`docs/OpenSignParity.md`), duplicated tooling re-verified at the frozen tip, stale docs frozen, the image-publishing workflow gated; tag + GitHub archive are operator actions | nothing in the estate refers to OpenSign except history                             |
 
 ## 5. Next actions (ordered)
 
@@ -257,11 +269,12 @@ table. Until those exist the RTO is an estimate rather than a measurement.
 4. ~~Open the Onyx SigV4 work item and land it~~ — **done 2026-09-15**
    (`services/objectstore/sigv4.go`, `storage.contract.spec.ts` 6/6, and
    `sigv4_vectors_test.go` replaying AWS's published vector suite against it).
-5. ~~**Run one restore drill**~~ — **done 2026-09-20** (`scripts/restore-drill.sh`,
-   both modes, recorded in `docs/DisasterRecovery.md` §4). **Still open: make the
-   backup target a different host** — no `BACKUP_S3_*` target is configured, so
-   backups are local-only today and the new `BackupIsLocalOnly` alert is telling
-   the truth.
+5. ~~**Run one restore drill**~~ — **done 2026-09-20**, including a production
+   dump read back out of the mirror (`docs/DisasterRecovery.md` §4). **Still open:
+   make the mirror a different host.** `BACKUP_S3_*` now points at ONYX and the job
+   mirrors successfully, but ONYX runs on the deployment host, so
+   `signara_backup_mirror_offhost` is 0 and `BackupIsLocalOnly` is telling the
+   truth rather than crying wolf.
 6. ~~**Cut storage over to Onyx**~~ — **done 2026-09-15**: 12 objects migrated
    and verified against `checksumSha256`, `SIGNARA_S3_*` points at the store,
    MinIO demoted to `legacy-storage` and stopped. See W3.
@@ -287,23 +300,23 @@ What is known:
 
 Decision tree:
 
-| Finding | Then |
-|---|---|
-| `.11` boots, or its disk can be attached | P3 as originally planned: dump + `opensign-files` volume → ETL → Onyx `legacy/` prefix |
-| An archive exists elsewhere (another host, cloud bucket, an operator's laptop) | P3 with the ETL written against the archive; verification report against `DocumentHash` |
-| Neither | **Record the write-off.** Signara starts clean; offer a documented import path (an operator can still hand over a PDF) and make sure nobody promises "your old envelopes are in here" |
+| Finding                                                                        | Then                                                                                                                                                                                  |
+| ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `.11` boots, or its disk can be attached                                       | P3 as originally planned: dump + `opensign-files` volume → ETL → Onyx `legacy/` prefix                                                                                                |
+| An archive exists elsewhere (another host, cloud bucket, an operator's laptop) | P3 with the ETL written against the archive; verification report against `DocumentHash`                                                                                               |
+| Neither                                                                        | **Record the write-off.** Signara starts clean; offer a documented import path (an operator can still hand over a PDF) and make sure nobody promises "your old envelopes are in here" |
 
-### The recovery attempt — performed 2026-09-15, found nothing ###
+### The recovery attempt — performed 2026-09-15, found nothing
 
 The timebox was one pass of looking, and it is spent. What was checked:
 
-| Source | Result |
-|---|---|
-| `192.168.1.11` | No ICMP; `:3000`, `:8080`, `:27017` closed; **`:22` closed too**, so it is not a reachable host in any state, only an address |
-| `mongodump` archives / `opensign-files` tarballs on this host | None. A filesystem-wide search for `*.tar.gz|*.tgz|*.bson|*.dump|*.archive` matching sign/opensign/mongo found nothing of ours |
-| The backup script | `sign-platform-backup.sh` appears in the `sign` repo **only inside the convergence documents** describing it, never as a committed file — so its destination was never recorded anywhere a reader could find it |
-| A network share or NAS | No NFS/CIFS/SMB mount on this host |
-| Retention | The documented retention was **14 days** from the first verified run on 2026-09-09, so even a surviving archive would have aged out around 2026-09-23 |
+| Source                                                        | Result                                                                                                                                                                                                          |
+| ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `192.168.1.11`                                                | No ICMP; `:3000`, `:8080`, `:27017` closed; **`:22` closed too**, so it is not a reachable host in any state, only an address                                                                                   |
+| `mongodump` archives / `opensign-files` tarballs on this host | None. A filesystem-wide search for `*.tar.gz                                                                                                                                                                    | *.tgz | *.bson | *.dump | *.archive` matching sign/opensign/mongo found nothing of ours |
+| The backup script                                             | `sign-platform-backup.sh` appears in the `sign` repo **only inside the convergence documents** describing it, never as a committed file — so its destination was never recorded anywhere a reader could find it |
+| A network share or NAS                                        | No NFS/CIFS/SMB mount on this host                                                                                                                                                                              |
+| Retention                                                     | The documented retention was **14 days** from the first verified run on 2026-09-09, so even a surviving archive would have aged out around 2026-09-23                                                           |
 
 **Decision: written off.** The P3 ETL is therefore not written — an ETL with no
 source is a liability, not progress. If an operator turns up a copy later, this
@@ -351,9 +364,9 @@ that is a different host, and a restore drill that has actually been run.
 
 ---
 
-*Companion docs: `docs/Architecture.md`, `docs/Deployment.md`,
+_Companion docs: `docs/Architecture.md`, `docs/Deployment.md`,
 `docs/Security.md`, `docs/DisasterRecovery.md`,
 `docs/OpenSignParity.md` (the harvested parity reference);
 `1-primary/sign/CONVERGENCE.md` (v1 history and the data mapping tables);
 `ips/docs/sign-in-posture.md` (the estate sign-in posture these workstreams plug
-into).*
+into)._
