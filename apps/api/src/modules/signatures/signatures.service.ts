@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
+import { ConfigService } from '@nestjs/config';
 import { Queue } from 'bullmq';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import {
@@ -68,6 +69,7 @@ export class SignaturesService {
     private readonly prisma: PrismaService,
     private readonly minio: MinioService,
     private readonly certificates: CertificatesService,
+    private readonly config: ConfigService,
     @InjectQueue('signing') private readonly signingQueue: Queue,
   ) {}
 
@@ -550,42 +552,134 @@ export class SignaturesService {
     });
     if (!request) throw new NotFoundException('Signing request not found');
 
+    if (
+      request.status !== DocumentStatus.AWAITING_SIGNATURE &&
+      request.status !== DocumentStatus.IN_PROGRESS
+    ) {
+      throw new ConflictException('This request is no longer awaiting signatures');
+    }
+
+    const targets = await this.eligibleReminderTargets(request, {
+      minIntervalMs: 24 * 60 * 60 * 1000, // throttle: one per signer per 24h
+      // Someone asking for a reminder is a deliberate act, so the cap that
+      // stops automatic reminders becoming harassment does not apply to it.
+      maxReminders: Number.POSITIVE_INFINITY,
+      signerId,
+    });
+
+    const enqueued = await this.dispatchReminders(id, targets, { requestedBy: user.email });
+    return { success: true, enqueued };
+  }
+
+  /**
+   * Automatic reminders for requests nobody has acted on (issue #82).
+   *
+   * Driven by the `sweep-reminders` repeatable job on the signing queue, so a
+   * deployment whose API is not running reminds nobody — the queue metrics make
+   * that visible rather than silent.
+   *
+   * Scope is deliberately narrow: awaiting signatures, not past its deadline, and
+   * only signers whose turn has actually come.
+   */
+  async sweepDueReminders(): Promise<{ requests: number; enqueued: number }> {
+    // With no mail transport the mailer only records what it would have sent,
+    // so sweeping would write REMINDED events for reminders nobody received and
+    // burn each signer's cap — after which the real reminders would never go
+    // out. Better to remind nobody than to exhaust the budget invisibly.
+    if (!(this.config.get<string>('smtp.host') ?? '')) {
+      return { requests: 0, enqueued: 0 };
+    }
+
+    const afterDays = this.config.get<number>('reminders.afterDays') ?? 3;
+    const maxReminders = this.config.get<number>('reminders.max') ?? 3;
+
+    const requests = await this.prisma.signingRequest.findMany({
+      where: {
+        status: { in: [DocumentStatus.AWAITING_SIGNATURE, DocumentStatus.IN_PROGRESS] },
+        OR: [{ deadline: null }, { deadline: { gt: new Date() } }],
+        signers: { some: { status: { in: [SignerStatus.INVITED, SignerStatus.VIEWED] } } },
+      },
+      select: { id: true, mode: true },
+    });
+
+    let enqueued = 0;
+    for (const request of requests) {
+      const targets = await this.eligibleReminderTargets(request, {
+        minIntervalMs: afterDays * 24 * 60 * 60 * 1000,
+        maxReminders,
+      });
+      enqueued += await this.dispatchReminders(request.id, targets, { automatic: true });
+    }
+
+    return { requests: requests.length, enqueued };
+  }
+
+  /**
+   * Signers it is worth reminding right now: still invited or viewed, not
+   * reminded inside `minIntervalMs`, under `maxReminders`, and — in a sequential
+   * flow — whose turn it is. The last of those is the one the first version
+   * missed: chasing someone the request has not reached yet is noise, and it
+   * tells the signer a document is waiting that they cannot sign.
+   */
+  private async eligibleReminderTargets(
+    request: { id: string; mode: SigningMode },
+    options: { minIntervalMs: number; maxReminders: number; signerId?: string },
+  ): Promise<{ id: string; reminderCount: number }[]> {
     const signers = await this.prisma.signer.findMany({
       where: {
-        requestId: id,
-        ...(signerId ? { id: signerId } : {}),
+        requestId: request.id,
+        ...(options.signerId ? { id: options.signerId } : {}),
         status: { in: [SignerStatus.INVITED, SignerStatus.VIEWED] },
       },
+      include: { request: { select: { mode: true, status: true } } },
     });
 
-    // Throttle: max one reminder per signer per 24h
-    const reminderWindow = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    const reminderEvents = await this.prisma.signatureEvent.findMany({
+    const since = new Date(Date.now() - options.minIntervalMs);
+    const recent = await this.prisma.signatureEvent.findMany({
       where: {
-        requestId: id,
+        requestId: request.id,
         type: SignatureEventType.REMINDED,
-        createdAt: { gt: reminderWindow },
+        createdAt: { gt: since },
       },
     });
-    const recentlyReminded = new Set(reminderEvents.map((e) => e.signerId).filter(Boolean));
+    const recentlyReminded = new Set(recent.map((e) => e.signerId).filter(Boolean));
 
-    const targets = signers.filter((s) => !recentlyReminded.has(s.id));
+    const targets: { id: string; reminderCount: number }[] = [];
+    for (const signer of signers) {
+      if (recentlyReminded.has(signer.id)) continue;
+      if (signer.reminderCount >= options.maxReminders) continue;
+      if (!(await this.canSignerAct(signer))) continue;
+      targets.push({ id: signer.id, reminderCount: signer.reminderCount });
+    }
+    return targets;
+  }
+
+  /** Queues the reminder mails and writes the trail for each one. */
+  private async dispatchReminders(
+    requestId: string,
+    targets: { id: string; reminderCount: number }[],
+    metadata: Record<string, unknown>,
+  ): Promise<number> {
     for (const signer of targets) {
       await this.signingQueue.add(
         'send-signing-reminder',
-        { requestId: id, signerId: signer.id, attempt: signer.reminderCount + 1 },
+        {
+          requestId,
+          signerId: signer.id,
+          attempt: signer.reminderCount + 1,
+          // Without this the processor treats the job as an invitation and sends
+          // the invite template, which is what every reminder did before.
+          kind: 'reminder',
+        },
         { delay: 0 },
       );
       await this.prisma.signer.update({
         where: { id: signer.id },
         data: { reminderCount: { increment: 1 } },
       });
-      await this.recordEvent(id, SignatureEventType.REMINDED, signer.id, {
-        requestedBy: user.email,
-      });
+      await this.recordEvent(requestId, SignatureEventType.REMINDED, signer.id, metadata);
     }
-
-    return { success: true, enqueued: targets.length };
+    return targets.length;
   }
 
   /** Certificate / audit evidence report for a request. */
