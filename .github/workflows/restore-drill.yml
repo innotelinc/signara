@@ -1,0 +1,55 @@
+name: Restore drill
+
+# The drill exists because this estate lost a platform's entire history to
+# backups that were written but never restored (see docs/DisasterRecovery.md).
+# An unrun script is a plan, so the drill is scheduled rather than remembered:
+# a backup path that has quietly stopped working fails here, in a place that
+# reports it, instead of on the day someone needs it.
+#
+# Seed mode only: it builds a database from this repo's own migrations, so it
+# needs no production data and no secrets. Dumping *real* data is the operator's
+# drill on the deployment host, recorded in docs/DisasterRecovery.md §4.
+on:
+  workflow_dispatch:
+  schedule:
+    # 04:00 on the first of the month, an hour clear of the nightly backup jobs.
+    - cron: "0 4 1 * *"
+
+concurrency:
+  group: restore-drill-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: 22
+
+jobs:
+  drill:
+    name: Restore a backup into a throwaway database
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Run the drill
+        # The script picks its own free loopback port and its own throwaway
+        # containers, so it cannot collide with anything on the runner.
+        run: scripts/restore-drill.sh 2>&1 | tee drill.log
+
+      - name: Keep the log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: restore-drill-log
+          path: drill.log
+          retention-days: 90
