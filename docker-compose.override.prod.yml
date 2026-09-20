@@ -3,26 +3,10 @@
 #
 #   docker compose -f docker-compose.prod.yml -f docker-compose.override.prod.yml up -d
 #
-# Fixes the API healthcheck: the stock probe uses `wget localhost`, but
-# `localhost` resolves to ::1 inside the container while the app binds IPv4
-# (0.0.0.0) only, so the probe always fails and the API is marked unhealthy.
+# The api/frontend healthchecks used to be corrected here (`wget localhost`
+# resolves to ::1 while both apps bind IPv4). They now live in
+# docker-compose.prod.yml, so this file is only about *this host's* topology.
 services:
-  api:
-    healthcheck:
-      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:8000/ready']
-      interval: 15s
-      timeout: 5s
-      retries: 10
-      start_period: 30s
-
-  frontend:
-    healthcheck:
-      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:3000/']
-      interval: 15s
-      timeout: 5s
-      retries: 10
-      start_period: 30s
-
   # Public object-storage endpoint used by browser-facing presigned document
   # URLs (S3_PUBLIC_ENDPOINT, e.g. https://storage.signara.innotel.us). Host
   # port 9002 avoids the host 9000 taken by Cerulean's Authentik.

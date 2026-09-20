@@ -69,16 +69,38 @@ those hosts and `localhost:3000` for development — and only needs
 
 ### Operations
 
-| Task          | Command                                                                           |
-| ------------- | --------------------------------------------------------------------------------- |
-| View status   | `docker compose -f docker-compose.prod.yml ps`                                    |
-| API logs      | `docker compose -f docker-compose.prod.yml logs -f api`                           |
-| Upgrade       | `git pull && ./setup.sh --production`                                             |
-| Backup        | `docker compose -f docker-compose.prod.yml exec backup /backup/backup.sh`         |
-| Restore       | `docker compose -f docker-compose.prod.yml exec backup /backup/restore.sh <file>` |
-| Stop services | `docker compose -f docker-compose.prod.yml down`                                  |
-| Monitoring    | `--profile monitoring up -d prometheus alertmanager` (UIs on loopback)            |
-| Metrics       | Prometheus `127.0.0.1:9090`, Alertmanager `127.0.0.1:9093`, Grafana `:3001`       |
+Always pass **both** files — the second one is not optional:
+
+```bash
+COMPOSE="docker compose -f docker-compose.prod.yml -f docker-compose.override.prod.yml"
+```
+
+| Task          | Command                                                                     |
+| ------------- | --------------------------------------------------------------------------- |
+| View status   | `$COMPOSE ps`                                                               |
+| API logs      | `$COMPOSE logs -f api`                                                      |
+| Upgrade       | `git pull && ./setup.sh --production`                                       |
+| Backup        | `$COMPOSE exec backup /backup/backup.sh`                                    |
+| Restore       | `$COMPOSE exec backup /backup/restore.sh <file>`                            |
+| Stop services | `$COMPOSE down`                                                             |
+| Monitoring    | `$COMPOSE --profile monitoring up -d prometheus alertmanager`               |
+| Metrics       | Prometheus `127.0.0.1:9090`, Alertmanager `127.0.0.1:9093`, Grafana `:3001` |
+
+**Using `-f docker-compose.prod.yml` alone is a real footgun, not a shortcut on
+this host.** `docker-compose.override.prod.yml` carries this deployment's
+topology, and a bare `up -d` silently undoes three things at once:
+
+- `backup` loses the external `cerulean` network, so the identity dump fails
+  with `could not translate host name "cerulean-authentik-postgres"` and
+  `BackupJobFailed` fires — while the documents still restore, which is the
+  worst version of a backup problem to discover late.
+- the `monitoring` profile stops applying, so Grafana and Loki (deliberately
+  left down) get started by what looks like a routine command.
+- nothing on the host is re-`build`-ed, so it is easy to believe the run was a
+  no-op.
+
+A container keeps its old config if a command does not recreate it, so this is
+easy to miss: the damage only shows up on the _next_ recreate of that service.
 
 All Compose services include health checks, restart policies, resource limits,
 and bounded JSON logging. The API waits for PostgreSQL, Redis, and Meilisearch
