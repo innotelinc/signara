@@ -293,7 +293,92 @@ SMTP configuration is optional in local development. Set `SMTP_HOST`,
 `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, and `SMTP_FROM` to enable
 invitation, reminder, and notification delivery.
 
-## 6. Post-setup checklist
+## 6. Upgrading an existing deployment
+
+Start by reading what is actually running, because the answer is not what the
+tags suggest: **the deployment does not run images from the registry.** Both
+`signara-api-1` and `signara-frontend-1` report no `RepoDigests`, and the
+`ghcr.io/innotelinc/signara-api:latest` on the host was built there on 2026-09-08
+— so it is a different artifact from the registry's `latest`, which CI pushes from
+`main` and `v*`. Until one of the two routes below is chosen and applied, "the tag
+names the build" is false on this host, and an upgrade is a rebuild, not a pull.
+
+Pick one route and stay on it. Mixing them is how a host ends up running a build
+nobody can name.
+
+### 6.1 Host build (what is deployed today)
+
+```bash
+cd /usr/src/projects/complete/1-primary/signara
+COMPOSE="docker compose -f docker-compose.prod.yml -f docker-compose.override.prod.yml"
+
+# 1. Name what you are leaving behind, so rollback is a retag and not a rebuild.
+docker tag ghcr.io/innotelinc/signara-api:latest signara-api:rollback-$(date +%Y%m%d)
+docker tag ghcr.io/innotelinc/signara-web:latest signara-web:rollback-$(date +%Y%m%d)
+
+# 2. Back up first. A migration is the one step a rollback cannot undo.
+make backup
+
+# 3. Code and images.
+git pull --ff-only
+$COMPOSE build api frontend migrate
+
+# 4. Schema, then the long-running services.
+$COMPOSE run --rm migrate           # prisma migrate deploy, once
+$COMPOSE up -d --no-deps api frontend
+```
+
+### 6.2 Registry artifacts (pin what you run)
+
+Set both images in `.env` and the upgrade becomes a pull:
+
+```bash
+SIGNARA_API_IMAGE=ghcr.io/innotelinc/signara-api:sha-<commit>
+SIGNARA_WEB_IMAGE=ghcr.io/innotelinc/signara-web:sha-<commit>
+```
+
+CI publishes `sha-<commit>` for every build, version tags on `v*`, and a moving
+`latest`. **Pin to `sha-<commit>` or a version tag, not `latest`:** pinning is what
+makes "this deployment is running X" a claim `docker inspect` can check, and it is
+what makes rollback a variable change rather than a rebuild. Then:
+
+```bash
+$COMPOSE pull api frontend migrate
+$COMPOSE run --rm migrate
+$COMPOSE up -d --no-deps api frontend
+```
+
+### 6.3 Migrations
+
+- `migrate` runs `prisma migrate deploy` against the API image — the same schema
+  the API expects, applied before the new API starts. Keep that order.
+- Migrations are **forward-only**: Prisma has no down-migrations, so a bad one is
+  undone by restoring the pre-upgrade dump, not by a reverse migration. That is
+  why §6.1 runs the backup first, and why `BackupStale` is worth reading before
+  an upgrade.
+- Stop `api` and `frontend` (`$COMPOSE stop api frontend`) when a migration
+  rewrites or drops data: a one-shot migration while the old API is serving is
+  the state that produces half-migrated reads.
+- Never `prisma migrate reset`, `db push` or `--force-reset` in production. They
+  drop the database, and the dump is the only thing that would bring it back.
+
+### 6.4 Verify, then record
+
+1. `$COMPOSE ps` — `api`, `frontend`, `postgres`, `redis`, `meilisearch` healthy.
+2. `curl -fsS https://api.signara.innotel.us/ready`.
+3. `.github/workflows/smoke-test.yml` (signing round-trip through the edge).
+4. After any schema change, run `scripts/restore-drill.sh --dump <fresh dump>` and
+   record it in [DisasterRecovery.md](DisasterRecovery.md) §4. A rollback restores
+   an _older_ dump into the current schema, and that is the path a drill proves.
+
+### 6.5 Rolling back
+
+Retag or re-point the two services and recreate them — `up -d --no-deps api
+frontend` with the previous image ref — then repeat §6.4. Restore the dump **only**
+if a migration was applied: restoring over a healthy database to undo an
+application change loses every write since the dump for no reason.
+
+## 7. Post-setup checklist
 
 - [ ] `https://api.signara.innotel.us/ready` returns a healthy response
 - [ ] OIDC login round-trip works with MFA

@@ -239,8 +239,21 @@ stale references.
       (2026-09-20) runs seed mode monthly and keeps the log as an artifact, so the
       restore path is exercised between operator drills rather than only when someone
       remembers to run it.
-- [ ] Monitoring on the api/web/queue (the estate already runs SigNoz).
-- [ ] An upgrade path (Prisma migrations + image pinning) written down.
+- [ ] Monitoring on the api/web/queue — **deferred by decision (2026-09-20).**
+      Nothing on the host evaluates the rules right now: no Prometheus, Alertmanager,
+      Grafana or Loki runs there, so the alerts this workstream added — including
+      `BackupIsLocalOnly` and `IdentityDatabaseNotBackedUp` — are written, tested and
+      inert. The backup metrics endpoint does serve them (`backup-metrics:9101`,
+      verified). Revisit when the estate runs a shared monitoring stack, and route
+      alerts to a real receiver first: `alertmanager.yml`'s default receiver has no
+      destination.
+- [x] **An upgrade path written down** — `docs/Deployment.md` §6 (2026-09-20),
+      including the reading that matters most: the deployment does **not** run
+      registry images. Both containers report no `RepoDigests` and the local
+      `:latest` was built on the host on 2026-09-08, so it is a different artifact
+      from CI's `latest`, and the running API/web predate the harvested locales.
+      §6.1 and §6.2 are the two routes (host build, or pin `sha-<commit>` and pull);
+      §6.3–§6.5 cover forward-only migrations, verification, and rollback.
 
 **Exit:** the restore drill is a dated entry in the DR doc, not a plan — **met,
 including against a production dump on the deployment host.** What remains is
