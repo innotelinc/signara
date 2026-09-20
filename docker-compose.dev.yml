@@ -91,7 +91,8 @@ services:
       meilisearch:
         condition: service_healthy
     healthcheck:
-      test: ['CMD', 'wget', '-qO-', 'http://localhost:8000/ready']
+      # 127.0.0.1, not `localhost`: see the same note in docker-compose.prod.yml.
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:8000/ready']
       interval: 15s
       timeout: 5s
       retries: 10
