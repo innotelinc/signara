@@ -1,10 +1,12 @@
 import { Module } from '@nestjs/common';
 import { NotificationProcessor } from './notification.processor';
 import { SigningProcessor } from './signing.processor';
+import { WebhookProcessor } from './webhook.processor';
 import { ReminderSchedulerService } from './reminder-scheduler.service';
 import { QueueMetricsService } from './queue-metrics.service';
 import { MailerModule } from '../mailer/mailer.module';
 import { SignaturesModule } from '../signatures/signatures.module';
+import { WebhooksModule } from '../webhooks/webhooks.module';
 
 /**
  * BullMQ workers. Processors run in the API process; for higher throughput,
@@ -14,10 +16,11 @@ import { SignaturesModule } from '../signatures/signatures.module';
  * runs on a schedule — it does not import this module, so there is no cycle.
  */
 @Module({
-  imports: [MailerModule, SignaturesModule],
+  imports: [MailerModule, SignaturesModule, WebhooksModule],
   providers: [
     NotificationProcessor,
     SigningProcessor,
+    WebhookProcessor,
     ReminderSchedulerService,
     QueueMetricsService,
   ],

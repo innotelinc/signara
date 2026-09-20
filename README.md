@@ -107,16 +107,17 @@ deployment, Cerulean, ingress, TLS, backups, and operations.
 
 ## 📚 Documentation
 
-| Document                                                   | Purpose                                    |
-| ---------------------------------------------------------- | ------------------------------------------ |
-| [docs/Architecture.md](docs/Architecture.md)               | System design, components, data flows      |
-| [docs/Security.md](docs/Security.md)                       | Security baseline, threat model, hardening |
-| [docs/Deployment.md](docs/Deployment.md)                   | Compose, Authentik, NGINX, backups         |
-| [docs/DeveloperGuide.md](docs/DeveloperGuide.md)           | Local dev, conventions, testing            |
-| [docs/API.md](docs/API.md)                                 | API overview + OpenAPI usage               |
-| [docs/UserGuide.md](docs/UserGuide.md)                     | End-user workflows                         |
-| [docs/AdministrationGuide.md](docs/AdministrationGuide.md) | Tenant/billing/monitoring admin            |
-| [docs/DisasterRecovery.md](docs/DisasterRecovery.md)       | RPO/RTO, restore drills, runbooks          |
+| Document                                                   | Purpose                                        |
+| ---------------------------------------------------------- | ---------------------------------------------- |
+| [docs/Architecture.md](docs/Architecture.md)               | System design, components, data flows          |
+| [docs/Security.md](docs/Security.md)                       | Security baseline, threat model, hardening     |
+| [docs/Deployment.md](docs/Deployment.md)                   | Compose, Authentik, NGINX, backups             |
+| [docs/DeveloperGuide.md](docs/DeveloperGuide.md)           | Local dev, conventions, testing                |
+| [docs/API.md](docs/API.md)                                 | API overview + OpenAPI usage                   |
+| [docs/Webhooks.md](docs/Webhooks.md)                       | Outbound webhooks: events, signatures, retries |
+| [docs/UserGuide.md](docs/UserGuide.md)                     | End-user workflows                             |
+| [docs/AdministrationGuide.md](docs/AdministrationGuide.md) | Tenant/billing/monitoring admin                |
+| [docs/DisasterRecovery.md](docs/DisasterRecovery.md)       | RPO/RTO, restore drills, runbooks              |
 
 The interactive API reference is served by the API itself (dev:
 http://localhost:8000/api/v1/docs); the full OpenAPI 3.0.3 spec lives in

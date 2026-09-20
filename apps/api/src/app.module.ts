@@ -24,6 +24,7 @@ import { BillingModule } from './modules/billing/billing.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { ApiKeysModule } from './modules/api-keys/api-keys.module';
+import { WebhooksModule } from './modules/webhooks/webhooks.module';
 import { JobsModule } from './modules/jobs/jobs.module';
 
 @Module({
@@ -55,6 +56,7 @@ import { JobsModule } from './modules/jobs/jobs.module';
     AdminModule,
     NotificationsModule,
     ApiKeysModule,
+    WebhooksModule,
     JobsModule,
   ],
   providers: [

@@ -272,6 +272,7 @@ model Organization {
   templates       Template[]
   tenantSettings  Setting[]
   apiKeys         ApiKey[]
+  webhookEndpoints   WebhookEndpoint[]
   auditLogs       AuditLog[]
   signingRequests    SigningRequest[]
   signingCertificates SigningCertificate[]
@@ -687,6 +688,59 @@ model ApiKey {
   user         User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([organizationId])
+}
+
+// ------------------------------------------------------------- webhooks ---
+
+enum WebhookDeliveryStatus {
+  PENDING
+  DELIVERED
+  FAILED
+}
+
+/// An outbound HTTP endpoint the tenant wants told about signing events. The
+/// secret is recoverable (unlike an ApiKey) because every delivery is signed
+/// with it at send time; it is returned once on creation and never listed.
+model WebhookEndpoint {
+  id             String    @id @default(uuid())
+  organizationId String
+  url            String
+  /// Event names this endpoint receives; ["*"] receives every event.
+  events         String[]
+  secret         String
+  description    String?
+  active         Boolean   @default(true)
+  disabledAt     DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  deliveries   WebhookDelivery[]
+
+  @@index([organizationId])
+}
+
+/// One attempt-series for one event against one endpoint, kept so a subscriber
+/// reporting "we never got it" can be answered from the database rather than
+/// from log archaeology.
+model WebhookDelivery {
+  id             String                @id @default(uuid())
+  endpointId     String
+  organizationId String
+  event          String
+  payload        Json
+  status         WebhookDeliveryStatus @default(PENDING)
+  attempts       Int                   @default(0)
+  responseStatus Int?
+  error          String?
+  createdAt      DateTime              @default(now())
+  lastAttemptAt  DateTime?
+  deliveredAt    DateTime?
+
+  endpoint WebhookEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, createdAt])
+  @@index([endpointId, createdAt])
 }
 
 // ---------------------------------------------------------- notifications ---

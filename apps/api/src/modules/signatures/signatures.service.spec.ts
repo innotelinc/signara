@@ -1,10 +1,17 @@
 import { Test } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
-import { DocumentStatus, SigningMode, SignerRole, SignerStatus } from '@prisma/client';
+import {
+  DocumentStatus,
+  SignatureEventType,
+  SigningMode,
+  SignerRole,
+  SignerStatus,
+} from '@prisma/client';
 import { SignaturesService } from './signatures.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { MinioService } from '../../storage/minio.service';
 import { CertificatesService } from '../certificates/certificates.service';
+import { WebhooksService } from '../webhooks/webhooks.service';
 import { Queue } from 'bullmq';
 
 describe('SignaturesService', () => {
@@ -32,6 +39,7 @@ describe('SignaturesService', () => {
   };
 
   const queueMock = { add: jest.fn().mockResolvedValue(undefined) } as unknown as Queue;
+  const webhooksMock = { emit: jest.fn().mockResolvedValue(1) };
   // Mutable, and reset per test, so no case inherits another's configuration.
   let configValues: Record<string, unknown> = {};
   const configMock = {
@@ -53,6 +61,10 @@ describe('SignaturesService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    // clearAllMocks keeps implementations, so these two would otherwise leak
+    // between cases (`findUnique` is set to a value by the webhook tests).
+    prismaMock.signingRequest.findUnique.mockReset();
+    webhooksMock.emit.mockReset().mockResolvedValue(1);
     configValues = {
       'reminders.afterDays': 3,
       'reminders.max': 3,
@@ -67,6 +79,7 @@ describe('SignaturesService', () => {
         { provide: CertificatesService, useValue: { signWithCertificate: jest.fn() } },
         { provide: ConfigService, useValue: configMock },
         { provide: 'BullQueue_signing', useValue: queueMock },
+        { provide: WebhooksService, useValue: webhooksMock },
       ],
     }).compile();
 
@@ -127,6 +140,65 @@ describe('SignaturesService', () => {
       await expect(
         service.createRequest(user, { documentId: 'doc-1', signers: [] }),
       ).rejects.toThrow('At least one signer is required');
+    });
+  });
+
+  describe('webhook event mapping (issue #85)', () => {
+    type RecordEvent = (
+      requestId: string,
+      type: SignatureEventType,
+      signerId: string | null,
+      metadata: Record<string, unknown>,
+    ) => Promise<void>;
+
+    // The mapping is the contract with subscribers, so it is pinned directly:
+    // every audited event maps to exactly one webhook event, or deliberately
+    // to none. Getting this wrong is invisible until a customer notices.
+    const record = (type: SignatureEventType, metadata: Record<string, unknown> = {}) =>
+      (service as unknown as { recordEvent: RecordEvent }).recordEvent(
+        'req-1',
+        type,
+        's-1',
+        metadata,
+      );
+
+    beforeEach(() => {
+      prismaMock.signingRequest.findUnique.mockResolvedValue({ organizationId: 'org-1' });
+    });
+
+    it.each([
+      [SignatureEventType.CREATED, {}, 'request.created'],
+      [SignatureEventType.VIEWED, {}, 'request.viewed'],
+      [SignatureEventType.SIGNED, {}, 'request.signed'],
+      [SignatureEventType.SIGNED, { completed: true }, 'request.completed'],
+      [SignatureEventType.DECLINED, {}, 'request.declined'],
+      [SignatureEventType.CANCELLED, {}, 'request.cancelled'],
+      [SignatureEventType.EXPIRED, {}, 'request.expired'],
+      [SignatureEventType.REMINDED, {}, 'request.reminded'],
+    ])('maps %s to %s', async (type, metadata, expected) => {
+      await record(type as SignatureEventType, metadata as Record<string, unknown>);
+      expect(webhooksMock.emit).toHaveBeenCalledWith(
+        expected,
+        expect.objectContaining({ organizationId: 'org-1', requestId: 'req-1' }),
+      );
+    });
+
+    it.each([
+      SignatureEventType.INVITED,
+      SignatureEventType.VOIDED,
+      SignatureEventType.APPROVED,
+      SignatureEventType.REJECTED,
+      SignatureEventType.DOWNLOADED,
+      SignatureEventType.EMAIL_FAILED,
+    ])('emits nothing for the internal event %s', async (type) => {
+      await record(type as SignatureEventType);
+      expect(webhooksMock.emit).not.toHaveBeenCalled();
+    });
+
+    it('still records the audit event when the webhook fan-out fails', async () => {
+      webhooksMock.emit.mockRejectedValueOnce(new Error('redis unavailable'));
+      await expect(record(SignatureEventType.SIGNED)).resolves.toBeUndefined();
+      expect(prismaMock.signatureEvent.create).toHaveBeenCalled();
     });
   });
 
