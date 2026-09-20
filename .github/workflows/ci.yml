@@ -38,6 +38,12 @@ jobs:
       - name: Commit message policy
         run: bash scripts/check-commit-messages.sh
 
+      # A history rewrite renumbers every SHA, so a cited commit can go dead
+      # without anyone touching the line that cites it. Keep every backticked
+      # commit reference in the tree resolvable.
+      - name: Commit citation policy
+        run: bash scripts/check-refs.sh
+
       - name: Lint
         run: npm run lint
 
