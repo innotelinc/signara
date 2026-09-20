@@ -32,7 +32,9 @@ Per the federation rule — *Cerulean owns trust, Onyx owns storage, Magnate own
 revenue, NPM Edge owns the edge* — convergence is complete when:
 
 1. Signara is the **only** e-signature stack; no `sign-platform` repo, image,
-   volume, DNS name, proxy host or document reference survives.
+   volume, DNS name, proxy host or document reference survives. (The `sign`
+   repository itself survives as an archived, read-only historical record —
+   that is the recorded past, not a deployable second stack.)
 2. Every public name it serves is **Authentik-only** (no local credential path),
    and that claim is backed by a committed test, like the other zones.
 3. Documents, signatures and audit evidence live in the **Onyx** object store,
@@ -84,6 +86,12 @@ statements — the bodies name no internal host or address, because the reposito
 is public — so this table stays the internal view and the tracker is the working
 one.
 
+The reference the rows are measured against is [`docs/OpenSignParity.md`](OpenSignParity.md),
+harvested from the fork on 2026-09-20 before it was frozen: the field vocabulary
+#81 has to cover (and the behaviours its strings imply), the request and
+completion mail subjects and bodies #83 has to keep, and the certificate layout
+#84 has to match. Nothing in it is a code port — only what a user saw.
+
 | Capability | Evidence in Signara today | Gap to close |
 |---|---|---|
 | Upload / versions / download | `documents` controller: `upload`, `:id`, `:id/download`, `:id/versions` | — |
@@ -100,7 +108,7 @@ one.
 | In-person signing | — | decide: needed for the self-hosted use case, or explicitly out of scope |
 | Cloud-storage imports (Drive/Dropbox/OneDrive) | — | decide; Onyx is the destination, so these are *sources* only |
 | SMS / WhatsApp delivery | — | decide; email-only is defensible, but say so |
-| i18n | **no locales directory found** | OpenSign shipped many languages; if the estate has non-English signers this is a real gap |
+| i18n | `public/locales/` with 7 catalogs (de, en, es, fr, hi, it, kr) harvested from the retired fork, wired through `web/src/lib/i18n/` | the harvested catalogs describe OpenSign's screens, not Signara's newer ones — extract the remaining strings into keys as screens are touched |
 | Billing | `billing` module (`plans`, `subscriptions`, `invoices`, `usage`) | align with Magnate as the revenue owner (the estate rule) rather than a second billing system |
 | Admin/ops view | `admin`: orgs, users, status, `metrics` | — |
 
@@ -196,7 +204,11 @@ what is owed to users in place of the history.
 - [ ] Mail: keep `MAILGUN_SENDER`/SMTP identity stable and verify SPF/DKIM/DMARC
   for the signing domain *before* anything else changes — completion emails are
   the product's most visible surface.
-- [ ] Re-point anything still describing "sign-platform" in docs/comments.
+- [x] Re-point anything still describing "sign-platform" in docs/comments — **done
+  2026-09-19**: an estate-wide audit found no live references outside the
+  retirement record itself, and the `sign` repo's forward-looking claims (README,
+  `docs/stack.md`, the landing page) now say retired rather than "converging".
+  Findings in `1-primary/sign/ARCHIVE.md` §7.
 
 **Exit:** one documented public name set, valid certs, mail authenticated, no
 stale references.
@@ -221,7 +233,7 @@ stale references.
 | **P2 — Onyx** | W3 | **Done 2026-09-15** — SigV4 shipped and deployed, 12 objects migrated and verified, MinIO demoted | a presigned fetch through the edge returns the recorded checksum with MinIO stopped |
 | **P3 — Migration** | W4 | **Conditional on §6** | counts reconcile *or* a recorded write-off |
 | **P4 — Cutover** | W5 | **Done** (2026-09-15) | signers sign on Signara at `sign.innotel.us` |
-| **P5 — Retire legacy** | archive the `sign` repo, drop dead DNS/proxy hosts, final doc pass | **Not started** | nothing in the estate refers to OpenSign except history |
+| **P5 — Retire legacy** | archive the `sign` repo, drop dead DNS/proxy hosts, final doc pass | **In progress** (2026-09-19 inventory, 2026-09-20 harvest) — locales harvested, the parity reference written (`docs/OpenSignParity.md`), duplicated tooling re-verified at the frozen tip, stale docs frozen, the image-publishing workflow gated; tag + GitHub archive are operator actions | nothing in the estate refers to OpenSign except history |
 
 ## 5. Next actions (ordered)
 
@@ -241,6 +253,13 @@ stale references.
 6. ~~**Cut storage over to Onyx**~~ — **done 2026-09-15**: 12 objects migrated
    and verified against `checksumSha256`, `SIGNARA_S3_*` points at the store,
    MinIO demoted to `legacy-storage` and stopped. See W3.
+7. **Archive `sign` on GitHub** (P5) — follow `1-primary/sign/ARCHIVE.md`: tag the
+   frozen commit, archive the repository read-only, and stop its
+   image-publishing workflow (gated to manual dispatch on 2026-09-20; the two
+   GHCR packages it published are an operator decision, ARCHIVE.md §6). The
+   assets worth keeping are already out: the seven locale catalogs ship in
+   `apps/web/public/locales/` and the vocabulary/mail/certificate reference the
+   parity rows need is [docs/OpenSignParity.md](OpenSignParity.md).
 
 ## 6. The legacy data question (do this first)
 
@@ -318,7 +337,8 @@ that is a different host, and a restore drill that has actually been run.
 ---
 
 *Companion docs: `docs/Architecture.md`, `docs/Deployment.md`,
-`docs/Security.md`, `docs/DisasterRecovery.md`;
+`docs/Security.md`, `docs/DisasterRecovery.md`,
+`docs/OpenSignParity.md` (the harvested parity reference);
 `1-primary/sign/CONVERGENCE.md` (v1 history and the data mapping tables);
 `ips/docs/sign-in-posture.md` (the estate sign-in posture these workstreams plug
 into).*
