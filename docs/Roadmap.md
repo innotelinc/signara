@@ -63,19 +63,33 @@ proof and the tenant model's edges.
       The token it needs to mint identities comes from Cerulean's `.env` (the trust
       layer) unless `AUTHENTIK_BOOTSTRAP_TOKEN` is set, overridable with
       `AUTHENTIK_ENV_FILE`.
-- [ ] Confirm there is no break-glass password path in the web app (the API has
-      none — check the Next.js auth routes route through the API only).
-- [ ] Role model: `Organization → Workspace → Team` exists in Prisma
-      (`Organization`, `Membership`, `Workspace`, `WorkspaceMember`, `Team`,
-      `Role`, `Permission`); decide the **operator** view vs the **tenant** view and
-      document the mapping to Authentik groups.
-- [ ] Decide whether signers (external, unauthenticated parties) are ever
-      Authentik users. Today they are **token-bearing guests** (`POST /signatures/public/:token/sign`,
-      web route `/sign/[token]`) — that is the right model; record it so nobody
-      "fixes" it later.
+- [x] **No break-glass password path — confirmed 2026-09-20, both sides.** The API
+      exposes only `login`/`callback`/`refresh`/`logout`/`me` and the auth module
+      mentions passwords nowhere. The web app is the part that was unverified: it
+      depends on `next`/`react`/`react-dom`/`lucide-react` only — no auth library —
+      and has **no `app/api` route handlers**, so there is no route that could
+      accept a credential; `/login` is an interstitial that sends the browser to
+      the API's OIDC login. Now recorded in `docs/Security.md` and asserted on the
+      running deployment by the smoke test, not just read once.
+- [x] **Role model documented 2026-09-20** (`docs/Security.md` §3): entry is the
+      Authentik application's group binding; `IDP_ADMIN_GROUP` (default
+      `signara-admins`) in the OIDC `groups` claim maps to `User.platformRole` and
+      gives the **operator** view (`admin` module, `PermissionsGuard`
+      short-circuit, least-privilege `USER` otherwise); the **tenant** view is the
+      Prisma `Role`/`Permission` graph via `Membership`/`WorkspaceMember`, scoped by
+      `TenantGuard`. Written down explicitly because the asymmetry is the
+      surprising part: Authentik never assigns tenant roles, and Signara never
+      creates Authentik groups.
+- [x] **Signers are token-bearing guests, decided and recorded 2026-09-20.**
+      `sgn_<192-bit>` on the four `@Public()` routes (`GET|POST
+/signatures/public/:token{,/sign,/decline,/events}`) plus web `/sign/[token]`;
+      never Authentik users, and `docs/Security.md` §2 says why that is deliberate
+      so nobody "fixes" it later.
 
 **Exit:** the verify script passes in CI/locally, and the guest-vs-user boundary
-is written down in `docs/Security.md`.
+is written down in `docs/Security.md`. — **met 2026-09-20**: §2 now carries the
+user/guest boundary table and the "no password door" evidence; verify-sso.py was
+re-run green against the live deployment the same day. **W1 is closed.**
 
 ### W2 — Feature parity with OpenSign (P1)
 

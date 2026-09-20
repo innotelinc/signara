@@ -49,5 +49,19 @@ jobs:
           grep -qE "href=\"${{ inputs.base_url }}/api/v1/auth/login" <<<"$html" \
             || echo "::warning::no login link to ${{ inputs.base_url }} found on the landing page"
 
+      # Signara is OIDC-only and docs/Security.md says so: there is no password
+      # endpoint and the web app ships no auth library. A password input on the
+      # deployed login page would mean a second way in exists, so it is checked
+      # on the running deployment rather than trusted to a code reading. No -L:
+      # if the page ever redirects to the IdP, the body is empty and this passes
+      # rather than reading Authentik's own form.
+      - name: Login page offers no password door
+        run: |
+          body="$(curl -fsS "${{ inputs.web_url }}/login")"
+          if grep -qiE 'type="password"|name="password"' <<<"$body"; then
+            echo "::error::${{ inputs.web_url }}/login serves a password input — sign-in must be OIDC-only"
+            exit 1
+          fi
+
       - name: Report smoke-test status
         run: echo "Smoke tests passed for ${{ inputs.base_url }}"

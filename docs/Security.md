@@ -28,6 +28,45 @@
   random (`sgn_...`), never logged, expire with the request, and one view/sign
   per token per signer.
 
+### The user/guest boundary
+
+Two populations reach Signara, and they are kept separate deliberately:
+
+|            | Signed-in users                             | Signers (guests)                                                                    |
+| ---------- | ------------------------------------------- | ----------------------------------------------------------------------------------- |
+| Who        | staff, tenants, operators                   | whoever a signing request was addressed to                                          |
+| Identity   | Authentik (OIDC) — the only way in          | a per-signer token; no account exists                                               |
+| Credential | `signara_access` / `signara_refresh` + JWT  | `sgn_<192-bit random>` (`generateToken()`, base64url, never logged)                 |
+| Surface    | every `/api/v1` route except the four below | `GET\|POST /signatures/public/:token{,/sign,/decline,/events}`, web `/sign/[token]` |
+
+The four public routes carry `@Public()` in `signatures.controller.ts` and are the
+only ones exempt from `JwtAuthGuard`. What authorizes a guest is the token plus
+their own status on the request — one view/sign per token per signer, with IP and
+user agent recorded against the event.
+
+**Signers are never Authentik users, and should not be made into any.** Giving an
+external party an account in order to receive a signature would pull them into
+the identity plane this estate gates every other surface on, for no gain: the
+token is already a stronger, narrower credential than a login would be. Recorded
+here so it is not "fixed" later.
+
+### There is no password door
+
+Sign-in is OIDC-only, and there is no second way in — not in the API, and not in
+the web app, which is the part that would be easy to miss:
+
+- **API:** `auth.controller.ts` exposes `GET login`, `GET callback`, `POST refresh`,
+  `POST logout`, `GET me`. There is no password endpoint, and the auth module
+  contains no reference to passwords at all.
+- **Web:** `apps/web` depends only on `next`, `react`, `react-dom`, and
+  `lucide-react` — no auth library — and has **no `app/api` route handlers**, so it
+  has no server-side endpoint that could accept a credential. `/login` is an
+  interstitial that counts down and sends the browser to the API's OIDC login
+  (`apps/web/src/app/login/login-interstitial.tsx`); it renders no form.
+- **Asserted, not assumed:** `scripts/verify-sso.py` fails if anything
+  password-shaped answers on the flow's entry points, and the manual smoke test
+  fails if the deployed login page serves a password input.
+
 ## 3. Authorization & RBAC
 
 - Roles (system): `USER`, `MANAGER`, `AUDITOR`, `ADMINISTRATOR`,
@@ -38,6 +77,30 @@
   `PermissionsGuard` (authz) — global guards registered in `app.module.ts`.
 - Auditors get read-only visibility (`audit.read`, `audit.export`); only
   OWNER/ADMIN manage members; only PLATFORM_ADMIN can administer tenants.
+
+### Operator view vs tenant view
+
+Three layers, each answering a different question, in this order:
+
+| Layer             | Question                                  | Where it lives                                                                                        |
+| ----------------- | ----------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| **Entry**         | may this identity use Signara at all?     | Authentik — the `Signara` application's group binding (default group `Signara`)                       |
+| **Platform role** | may this user see across tenants?         | `IDP_ADMIN_GROUP` (default `signara-admins`) present in the OIDC `groups` claim → `User.platformRole` |
+| **Tenant role**   | what may they do inside one organization? | Prisma `Role` → `Permission` via `Membership` / `WorkspaceMember`, scoped by `TenantGuard`            |
+
+- The **operator view** is `platformRole = PLATFORM_ADMIN`: it is what the `admin`
+  module (organizations, users, status, metrics) requires, and `PermissionsGuard`
+  short-circuits for it. New users get the least-privilege `USER` role.
+- The **tenant view** is the Prisma role graph (`USER`, `MANAGER`, `AUDITOR`,
+  `ADMINISTRATOR`, `ORGANIZATION_OWNER`) scoped to one organization. An operator
+  administering the platform is not thereby a member of anyone's organization.
+- **The two directions are not symmetric.** Authentik decides entry and the
+  platform role; it does **not** assign tenant roles, and Signara does **not**
+  create Authentik groups. Tenant roles are granted inside Signara.
+- `platformRole` is recomputed from the `groups` claim on **every** login
+  (`loginWithIdp`), so removing someone from `signara-admins` demotes them at
+  their next sign-in instead of leaving a stale grant behind. That is why the
+  grant is derived rather than stored as a separate authority.
 
 ## 4. Data protection
 
