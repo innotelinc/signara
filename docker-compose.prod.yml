@@ -96,7 +96,12 @@ services:
       meilisearch:
         condition: service_healthy
     healthcheck:
-      test: ['CMD', 'wget', '-qO-', 'http://localhost:8000/ready']
+      # 127.0.0.1, not `localhost`: the container's /etc/hosts maps localhost to
+      # ::1 as well, busybox wget prefers IPv6, and Nest listens on 0.0.0.0
+      # (IPv4) — so `localhost` is refused and this reported unhealthy forever.
+      # That is not cosmetic: `frontend` waits on this service being healthy, so
+      # a full `up` deadlocked on the API rather than starting the web app.
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:8000/ready']
       interval: 15s
       timeout: 5s
       retries: 10
