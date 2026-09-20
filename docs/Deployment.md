@@ -361,7 +361,7 @@ the artifact came from. Both routes below have been used on this host:
   Dockerfile's `http://localhost` defaults were inlined into the client bundle:
   the landing page's sign-in link and the signing room's session fetch both
   resolved to `localhost:8000`, and the demo could not open a session. §6.1 is the
-  route that fixed it, and it is what this host runs as of `a29423e`.
+  route that fixed it, and it is what this host runs as of `5bf05bc`.
 
 The workflow now passes those args, so the next released image should be usable.
 Until one is published, an upgrade here is a rebuild, not a pull.
