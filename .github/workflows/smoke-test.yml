@@ -8,6 +8,11 @@ on:
         required: true
         default: https://api.signara.innotel.us
         type: string
+      web_url:
+        description: Base URL of the deployed Signara web app, including scheme
+        required: true
+        default: https://app.signara.innotel.us
+        type: string
 
 jobs:
   smoke:
@@ -28,6 +33,21 @@ jobs:
 
       - name: Metrics exposed (authenticated scrape not required)
         run: curl -s "${{ inputs.base_url }}/metrics" | grep -q signara_http_requests_total || echo "metrics not exposed — verify Prometheus job"
+
+      # The web bundle gets its API URL at *build* time, so an image built
+      # without build args serves a login link and API calls pointing at
+      # localhost. That looks like a working deploy and then fails in the
+      # browser, so it is checked explicitly.
+      - name: Deployed web app points at a real API, not localhost
+        run: |
+          html="$(curl -fsS "${{ inputs.web_url }}/")"
+          if grep -q 'localhost' <<<"$html"; then
+            echo "::error::${{ inputs.web_url }} serves a bundle built with localhost baked in"
+            grep -oE 'https?://localhost:[0-9]+[^" ]*' <<<"$html" | sort -u | head
+            exit 1
+          fi
+          grep -qE "href=\"${{ inputs.base_url }}/api/v1/auth/login" <<<"$html" \
+            || echo "::warning::no login link to ${{ inputs.base_url }} found on the landing page"
 
       - name: Report smoke-test status
         run: echo "Smoke tests passed for ${{ inputs.base_url }}"
