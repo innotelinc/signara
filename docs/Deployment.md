@@ -77,12 +77,45 @@ those hosts and `localhost:3000` for development — and only needs
 | Backup        | `docker compose -f docker-compose.prod.yml exec backup /backup/backup.sh`         |
 | Restore       | `docker compose -f docker-compose.prod.yml exec backup /backup/restore.sh <file>` |
 | Stop services | `docker compose -f docker-compose.prod.yml down`                                  |
-| Metrics       | Prometheus on `:9090`, Grafana on `:3001`                                         |
+| Monitoring    | `--profile monitoring up -d prometheus alertmanager` (UIs on loopback)            |
+| Metrics       | Prometheus `127.0.0.1:9090`, Alertmanager `127.0.0.1:9093`, Grafana `:3001`       |
 
 All Compose services include health checks, restart policies, resource limits,
 and bounded JSON logging. The API waits for PostgreSQL, Redis, and Meilisearch
 before becoming ready — deliberately **not** on the object store, so that the
 retired store can be stopped without the API refusing to boot.
+
+### Monitoring and alerts
+
+Prometheus, Alertmanager, Grafana, Loki, and the backup jobs are behind the
+`monitoring` profile, so a plain `up -d` leaves them stopped:
+
+```bash
+docker compose -f docker-compose.prod.yml -f docker-compose.override.prod.yml \
+  --profile monitoring up -d prometheus alertmanager backup backup-metrics
+```
+
+Prometheus and Alertmanager are published on **loopback only**. Neither has
+authentication, and Prometheus's query API plus Alertmanager's silence/alert list
+expose everything the stack collects, so they are deliberately not reachable from
+the network; reach them with an SSH tunnel (`ssh -L 9090:127.0.0.1:9090 …`) rather
+than through the edge.
+
+Alerts are delivered to `ALERT_EMAIL_TO` over the same mail identity the app's
+notification workers use (`SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/`SMTP_PASS`). If
+those are unset the stack still evaluates rules and shows them in the Alertmanager
+UI, and the container says so at start — but nobody is told, so set them.
+
+Note which relay you can actually use: hosts that block outbound port 25 cannot
+deliver mail directly to a recipient's MX, so this needs an **authenticated relay
+on 587 (or 465)**. `ALERT_EMAIL_TO` addresses a real mailbox; the previous
+`platform-critical@`/`platform@`/`oncall@` addresses were never provisioned, so
+critical alerts were addressed to nowhere.
+
+`infra/monitoring/alertmanager/alertmanager.yml` is a template: Alertmanager has
+no environment expansion, so `entrypoint.sh` substitutes it at container start and
+refuses to start if a placeholder is left behind. Editing the mounts to point
+Alertmanager straight at the file would silently restore the bug it exists to fix.
 
 ### Storage profile
 
@@ -295,13 +328,21 @@ invitation, reminder, and notification delivery.
 
 ## 6. Upgrading an existing deployment
 
-Start by reading what is actually running, because the answer is not what the
-tags suggest: **the deployment does not run images from the registry.** Both
-`signara-api-1` and `signara-frontend-1` report no `RepoDigests`, and the
-`ghcr.io/innotelinc/signara-api:latest` on the host was built there on 2026-09-08
-— so it is a different artifact from the registry's `latest`, which CI pushes from
-`main` and `v*`. Until one of the two routes below is chosen and applied, "the tag
-names the build" is false on this host, and an upgrade is a rebuild, not a pull.
+Start by reading what is actually running, because the tag does not say where
+the artifact came from. Both routes below have been used on this host:
+
+- **Registry pull — what ran until 2026-09-20.** `signara-api-1` and
+  `signara-frontend-1` both carried `RepoDigests` pointing at images CI built on
+  2026-09-07, so they were pulled rather than built here.
+- **Host build — what runs now.** Those pulled images had been built by
+  `docker-build.yml` *without* the web image's `NEXT_PUBLIC_*` build args, so the
+  Dockerfile's `http://localhost` defaults were inlined into the client bundle:
+  the landing page's sign-in link and the signing room's session fetch both
+  resolved to `localhost:8000`, and the demo could not open a session. §6.1 is the
+  route that fixed it, and it is what this host runs as of `a29423e`.
+
+The workflow now passes those args, so the next released image should be usable.
+Until one is published, an upgrade here is a rebuild, not a pull.
 
 Pick one route and stay on it. Mixing them is how a host ends up running a build
 nobody can name.
