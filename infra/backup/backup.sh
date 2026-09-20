@@ -24,6 +24,13 @@ REMOTE_OK=false
 # prove, and the alert stays up until it is proven.
 MIRROR_OFFHOST=0
 
+# Authentik is the identity plane: a restore without it brings the documents back
+# but not the accounts that reach them. On some deployments it runs in this stack;
+# on others it belongs to another one (in this estate, to Cerulean), so the dump is
+# taken only when a target is configured — and reported either way, because an
+# identity backup that is silently absent is a gap found during a restore.
+IDENTITY_COVERED=0
+
 log() { echo "[backup] $*"; }
 
 endpoint_host() { # strip scheme, credentials, port and path off an S3 endpoint
@@ -66,6 +73,7 @@ finish() {
         echo "signara_backup_remote_enabled 0"
       fi
       echo "signara_backup_mirror_offhost $MIRROR_OFFHOST"
+      echo "signara_backup_identity_covered $IDENTITY_COVERED"
     } > "$STATUS_FILE"
     log "backup completed successfully"
   else
@@ -73,12 +81,14 @@ finish() {
     remote_enabled="$(carried_over signara_backup_remote_enabled)"
     remote_success="$(carried_over signara_backup_remote_last_success_timestamp)"
     remote_offhost="$(carried_over signara_backup_mirror_offhost)"
+    identity_covered="$(carried_over signara_backup_identity_covered)"
     {
       echo "signara_backup_last_status 0"
       [[ -n "$last_success" ]] && echo "signara_backup_last_success_timestamp $last_success"
       [[ -n "$remote_enabled" ]] && echo "signara_backup_remote_enabled $remote_enabled"
       [[ -n "$remote_success" ]] && echo "signara_backup_remote_last_success_timestamp $remote_success"
       [[ -n "$remote_offhost" ]] && echo "signara_backup_mirror_offhost $remote_offhost"
+      [[ -n "$identity_covered" ]] && echo "signara_backup_identity_covered $identity_covered"
     } > "$STATUS_FILE"
     log "backup failed (exit $code)" >&2
   fi
@@ -100,9 +110,16 @@ backup_database() {
 backup_database "db" "${POSTGRES_HOST:-postgres}" "${POSTGRES_USER:-signara}" \
   "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}" "${POSTGRES_DB:-signara}"
 
-backup_database "authentik-db" "${AUTHENTIK_POSTGRES_HOST:-authentik-db}" \
-  "${AUTHENTIK_POSTGRES_USER:-authentik}" "${AUTHENTIK_POSTGRES_PASSWORD:?AUTHENTIK_POSTGRES_PASSWORD is required}" \
-  "${AUTHENTIK_POSTGRES_DB:-authentik}"
+if [[ -n "${AUTHENTIK_POSTGRES_PASSWORD:-}" ]]; then
+  backup_database "authentik-db" "${AUTHENTIK_POSTGRES_HOST:-authentik-db}" \
+    "${AUTHENTIK_POSTGRES_USER:-authentik}" "$AUTHENTIK_POSTGRES_PASSWORD" \
+    "${AUTHENTIK_POSTGRES_DB:-authentik}"
+  IDENTITY_COVERED=1
+else
+  log "WARNING: AUTHENTIK_POSTGRES_PASSWORD is unset — the identity database is"
+  log "WARNING: not in this backup, so a restore would bring back the documents"
+  log "WARNING: without the accounts that reach them (docs/DisasterRecovery.md §2)."
+fi
 
 : "${SOURCE_S3_ENDPOINT:?SOURCE_S3_ENDPOINT is required for object backup}"
 : "${SOURCE_S3_ACCESS_KEY:?SOURCE_S3_ACCESS_KEY is required for object backup}"
@@ -127,7 +144,9 @@ if [[ -n "${BACKUP_S3_ENDPOINT:-}" || -n "${BACKUP_S3_ACCESS_KEY:-}" || -n "${BA
   mc mb --ignore-existing "backup/$BACKUP_S3_BUCKET" >/dev/null
   mc mirror --overwrite "$OBJECT_BACKUP_DIR" "backup/$BACKUP_S3_BUCKET/minio/$TIMESTAMP"
   mc cp --quiet "$BACKUP_DIR/db-${TIMESTAMP}.dump" "backup/$BACKUP_S3_BUCKET/postgres/"
-  mc cp --quiet "$BACKUP_DIR/authentik-db-${TIMESTAMP}.dump" "backup/$BACKUP_S3_BUCKET/authentik/"
+  if [[ "$IDENTITY_COVERED" == 1 ]]; then
+    mc cp --quiet "$BACKUP_DIR/authentik-db-${TIMESTAMP}.dump" "backup/$BACKUP_S3_BUCKET/authentik/"
+  fi
   mc rm --recursive --force --older-than "${RETENTION_DAYS}d" "backup/$BACKUP_S3_BUCKET/minio" >/dev/null 2>&1 || true
   mc rm --recursive --force --older-than "${RETENTION_DAYS}d" "backup/$BACKUP_S3_BUCKET/postgres" >/dev/null 2>&1 || true
   mc rm --recursive --force --older-than "${RETENTION_DAYS}d" "backup/$BACKUP_S3_BUCKET/authentik" >/dev/null 2>&1 || true

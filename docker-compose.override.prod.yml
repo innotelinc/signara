@@ -44,5 +44,19 @@ services:
     profiles: ['monitoring']
   backup:
     profiles: ['monitoring']
+    # The identity plane on this host is Cerulean's Authentik, not a database in
+    # this stack, so the backup joins Cerulean's network to dump it. Without this
+    # the restore brings the documents back but not the logins — and the
+    # identity-coverage metric would be 0, which is what raises the alert.
+    networks:
+      - default
+      - cerulean
+    environment:
+      AUTHENTIK_POSTGRES_HOST: ${AUTHENTIK_POSTGRES_HOST:-cerulean-authentik-postgres}
   backup-metrics:
     profiles: ['monitoring']
+
+networks:
+  cerulean:
+    external: true
+    name: cerulean_default
