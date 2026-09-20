@@ -166,13 +166,13 @@ on login.
 
 ## 6. Secrets rotation runbook
 
-| Secret                     | Rotation                                                                                                                                        |
-| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `CRYPTO_MASTER_KEY`        | rotate only with a tested re-encryption procedure and application restart; retain the old key until verification completes.                     |
-| JWT access/refresh secrets | rotate → all sessions invalid on next refresh (refresh cookies use the old secret — issue a forced re-login if immediate revocation is needed). |
-| OIDC client secret         | rotate in Authentik + `.env`; no user impact besides a new token.                                                                               |
-| MinIO credentials          | rotate in MinIO console + `.env`; restart API (`api` reads at boot).                                                                            |
-| Postgres/Redis passwords   | rotate in `.env` + service config, restart the stack members.                                                                                   |
+| Secret                     | Rotation                                                                                                                                                                                                                                                                                                   |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CRYPTO_MASTER_KEY`        | rotate only with a tested re-encryption procedure and application restart; retain the old key until verification completes.                                                                                                                                                                                |
+| JWT access/refresh secrets | rotate → all sessions invalid on next refresh (refresh cookies use the old secret — issue a forced re-login if immediate revocation is needed).                                                                                                                                                            |
+| OIDC client secret         | rotate in Authentik + `.env`; no user impact besides a new token.                                                                                                                                                                                                                                          |
+| MinIO/object-store keys    | rotate in the store + `.env`; restart API (`api` reads at boot). **The backup mirror holds the same pair** — `BACKUP_S3_ACCESS_KEY`/`BACKUP_S3_SECRET_KEY` are set from `SIGNARA_S3_*` — so rotate both together, or the mirror alone starts failing (`BackupJobFailed`) while the application looks fine. |
+| Postgres/Redis passwords   | rotate in `.env` + service config, restart the stack members.                                                                                                                                                                                                                                              |
 
 ## 7. Runbooks
 
