@@ -7,6 +7,7 @@ import { BullModule } from '@nestjs/bullmq';
  *  - notifications : email/SMS dispatch
  *  - signing      : reminders, escalation, expiry sweeps
  *  - audit        : async audit export rendering
+ *  - webhooks     : outbound webhook delivery (see docs/Webhooks.md)
  */
 @Global()
 @Module({
@@ -30,6 +31,7 @@ import { BullModule } from '@nestjs/bullmq';
       { name: 'notifications' },
       { name: 'signing' },
       { name: 'audit' },
+      { name: 'webhooks' },
     ),
   ],
   exports: [BullModule],

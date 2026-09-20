@@ -109,6 +109,14 @@ export default () => ({
     // become harassment.
     max: Number(process.env.REMINDER_MAX ?? 3),
   },
+  // Outbound signing webhooks (issue #85). `allowPrivate` is off by default:
+  // endpoint URLs are tenant-supplied and the API is inside the deployment
+  // network, so a webhook is otherwise a clean SSRF pivot onto Redis,
+  // Postgres and the object store. Internal subscribers opt in explicitly.
+  webhooks: {
+    allowPrivate: process.env.WEBHOOKS_ALLOW_PRIVATE === 'true',
+    timeoutMs: Number(process.env.WEBHOOKS_TIMEOUT_MS ?? 10_000),
+  },
 });
 
 /**

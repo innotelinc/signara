@@ -59,6 +59,8 @@ const PERMISSIONS: Array<{ code: string; description: string; category: string }
   { code: 'apikeys.manage', description: 'Create and revoke API keys', category: 'apikeys' },
   // Notifications
   { code: 'notifications.read', description: 'View notifications', category: 'notifications' },
+  // Outbound webhooks
+  { code: 'webhooks.manage', description: 'Register, inspect, and remove outbound webhook endpoints', category: 'webhooks' },
   // Administration (platform-wide)
   { code: 'admin.platform', description: 'Platform administration (all tenants)', category: 'admin' },
   { code: 'admin.monitoring', description: 'View platform monitoring and metrics', category: 'admin' },

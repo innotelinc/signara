@@ -3,6 +3,7 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
@@ -22,6 +23,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { MinioService } from '../../storage/minio.service';
 import { CertificatesService, CertificateEvidence } from '../certificates/certificates.service';
 import { unsignedAssurance } from '../certificates/identity-assurance';
+import { WebhooksService, WebhookEvent } from '../webhooks/webhooks.service';
 import { AuthenticatedUser } from '../../common/types';
 
 export interface CreateRequestInput {
@@ -63,14 +65,49 @@ const DEMO_ORG_SLUG = 'signara-demo';
 const DEMO_DOC_TITLE = 'Signara Demo Agreement';
 const DEMO_SIGNER_EMAIL = 'demo@signara.local';
 
+/**
+ * Maps an audited signature event to the webhook a subscriber receives.
+ * Events with no external meaning (VOIDED, DOWNLOADED, EMAIL_FAILED, …) are
+ * deliberately unmapped rather than folded into a near-miss event.
+ */
+function webhookEventFor(
+  type: SignatureEventType,
+  metadata: Record<string, unknown>,
+): WebhookEvent | null {
+  switch (type) {
+    case SignatureEventType.CREATED:
+      return 'request.created';
+    case SignatureEventType.VIEWED:
+      return 'request.viewed';
+    // Completing a request is recorded as a second SIGNED event carrying
+    // `completed: true`; it gets its own event instead of duplicating the
+    // per-signer signature that was recorded just before it.
+    case SignatureEventType.SIGNED:
+      return metadata.completed === true ? 'request.completed' : 'request.signed';
+    case SignatureEventType.DECLINED:
+      return 'request.declined';
+    case SignatureEventType.CANCELLED:
+      return 'request.cancelled';
+    case SignatureEventType.EXPIRED:
+      return 'request.expired';
+    case SignatureEventType.REMINDED:
+      return 'request.reminded';
+    default:
+      return null;
+  }
+}
+
 @Injectable()
 export class SignaturesService {
+  private readonly logger = new Logger('SignaturesService');
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly minio: MinioService,
     private readonly certificates: CertificatesService,
     private readonly config: ConfigService,
     @InjectQueue('signing') private readonly signingQueue: Queue,
+    private readonly webhooks: WebhooksService,
   ) {}
 
   // ------------------------------------------------------------ create ----
@@ -158,6 +195,11 @@ export class SignaturesService {
         request.id,
         signingTrackers.map((s) => s.id),
       );
+      // Distinct from `request.created`: a request can be created without
+      // invites (draft), and only now has it actually gone out to signers.
+      await this.emitWebhookForRequest('request.sent', request.id, {
+        signerIds: signingTrackers.map((s) => s.id),
+      });
     }
 
     return this.prisma.signingRequest.findUniqueOrThrow({
@@ -929,6 +971,38 @@ export class SignaturesService {
           typeof metadata.userAgent === 'string' ? metadata.userAgent?.slice(0, 500) : undefined,
       },
     });
+
+    // Webhooks are emitted here rather than at each call site so the two event
+    // histories cannot drift: every audited event is also the webhook trigger.
+    const event = webhookEventFor(type, metadata);
+    if (event) await this.emitWebhookForRequest(event, requestId, { signerId, ...metadata });
+  }
+
+  /**
+   * Queues a tenant webhook for a request. Failure here is logged, never thrown:
+   * a subscriber being misconfigured must not stop a signature being collected.
+   */
+  private async emitWebhookForRequest(
+    event: WebhookEvent,
+    requestId: string,
+    payload: Record<string, unknown>,
+  ): Promise<void> {
+    try {
+      const request = await this.prisma.signingRequest.findUnique({
+        where: { id: requestId },
+        select: { organizationId: true },
+      });
+      if (!request) return;
+      await this.webhooks.emit(event, {
+        organizationId: request.organizationId,
+        requestId,
+        payload,
+      });
+    } catch (err) {
+      this.logger.warn(
+        `Webhook ${event} for request ${requestId} not queued: ${(err as Error).message}`,
+      );
+    }
   }
 
   private generateToken(): string {
