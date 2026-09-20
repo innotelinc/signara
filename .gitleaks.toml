@@ -1,0 +1,21 @@
+# gitleaks configuration.
+#
+# Extends the default rule set; the only change is a path allowlist for the
+# harvested i18n catalogs, which the generic-api-key heuristic reads as
+# credentials even though they contain none.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Public i18n catalogs — translation strings, not credentials"
+paths = [
+  # The catalogs are byte-identity pinned (see .prettierignore and
+  # apps/web/public/locales/README.md) and are served to browsers verbatim.
+  # Entries such as "benefit-api-access": "Acceso a API" and
+  # "hasta 100 firmas de API" clear generic-api-key's entropy threshold on
+  # the strength of ordinary localised prose. No committed text in them is a
+  # secret, and they cannot be reformatted to avoid the match without
+  # breaking the byte-identity the harvest rests on.
+  '''apps/web/public/locales/.*\.json''',
+]
