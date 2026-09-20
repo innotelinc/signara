@@ -214,15 +214,23 @@ what is owed to users in place of the history.
 stale references.
 
 ### W6 — Operations (P5)
-- [ ] **Backups that exist off the box:** database dump + object store, to a
-  location that is not the host being backed up (this is exactly the failure
-  that lost the legacy data).
-- [ ] A **restore drill** that has been performed and recorded in
-  `docs/DisasterRecovery.md`.
+- [ ] **Backups that exist off the box:** the *mechanism* is in place and now
+  reports its own state — `signara_backup_remote_enabled` plus the
+  `BackupIsLocalOnly` alert, so "the job ran" and "the copy left the host" are no
+  longer the same signal — but **no target is configured as of 2026-09-20**, so
+  today's backups still die with the host. Remaining: point `BACKUP_S3_*` at a
+  store on another host (ONYX's object store is the estate's storage owner and is
+  S3-speaking) and set `BACKUP_REQUIRE_REMOTE=true`.
+- [x] **A restore drill, performed and recorded** — `scripts/restore-drill.sh`
+  (2026-09-20), run in both seed and dump mode, refused a non-Signara dump, and
+  recorded with its limits in `docs/DisasterRecovery.md` §4.
 - [ ] Monitoring on the api/web/queue (the estate already runs SigNoz).
 - [ ] An upgrade path (Prisma migrations + image pinning) written down.
 
-**Exit:** the restore drill is a dated entry in the DR doc, not a plan.
+**Exit:** the restore drill is a dated entry in the DR doc, not a plan — **met for
+the tooling**, still open for the deployment: the remainder is (1) a mirror on
+another host, and (2) one drill against a **production** dump, dated in the same
+table. Until those exist the RTO is an estimate rather than a measurement.
 
 ## 4. Phase plan
 
@@ -249,7 +257,11 @@ stale references.
 4. ~~Open the Onyx SigV4 work item and land it~~ — **done 2026-09-15**
    (`services/objectstore/sigv4.go`, `storage.contract.spec.ts` 6/6, and
    `sigv4_vectors_test.go` replaying AWS's published vector suite against it).
-5. **Make the backup target a different host** and run one restore drill.
+5. ~~**Run one restore drill**~~ — **done 2026-09-20** (`scripts/restore-drill.sh`,
+   both modes, recorded in `docs/DisasterRecovery.md` §4). **Still open: make the
+   backup target a different host** — no `BACKUP_S3_*` target is configured, so
+   backups are local-only today and the new `BackupIsLocalOnly` alert is telling
+   the truth.
 6. ~~**Cut storage over to Onyx**~~ — **done 2026-09-15**: 12 objects migrated
    and verified against `checksumSha256`, `SIGNARA_S3_*` points at the store,
    MinIO demoted to `legacy-storage` and stopped. See W3.
@@ -310,9 +322,12 @@ that is a different host, and a restore drill that has actually been run.
 
 ## 7. Risks
 
-- **A second silent data loss.** Signara's own backups have not been proven
-  restorable and are not obviously off-host (§W6). Fix before anything else
-  changes.
+- **A second silent data loss.** Halved, not closed: the restore path is now
+  rehearsed (`scripts/restore-drill.sh`, §W6) and local-only backups are an alert
+  rather than a log line, so the failure would at least be visible. What remains is
+  the part that actually decides survival — **a mirror on another host**, and one
+  drill against a production dump. Until a target is configured, losing this host
+  still loses the data.
 - ~~**Onyx's SigV4 milestone slips.**~~ Cleared: SigV4 landed and the contract
   test passes against it. The residual risk is the **data copy** — moving
   existing objects into Onyx and proving the count, which is a migration chore

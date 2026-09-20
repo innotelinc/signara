@@ -120,12 +120,19 @@ fetching it through the edge, then comparing it to the document's
 
 ### Backups
 
-The production stack includes a backup container for PostgreSQL, Authentik, and
-MinIO objects. Each run writes database dumps and a MinIO archive to the persistent
-`backupcache` volume. Configure all `BACKUP_S3_*` variables for an off-host mirror,
-set `BACKUP_REQUIRE_REMOTE=true` when remote durability is mandatory, and tune
-`BACKUP_RETENTION_DAYS`. Run restore drills regularly; see
-[DisasterRecovery.md](DisasterRecovery.md).
+The production stack includes a backup container for PostgreSQL, Authentik, and the
+object store the API actually uses. Each run writes database dumps and an object
+archive to the persistent `backupcache` volume. Configure all `BACKUP_S3_*`
+variables for an off-host mirror and `BACKUP_RETENTION_DAYS` for retention; set
+`BACKUP_REQUIRE_REMOTE=true` so a missing mirror **fails** the run instead of
+downgrading it to local-only.
+
+A mirror is required, not optional: the `backupcache` volume sits on the host whose
+database it protects. Whether one is configured is reported as
+`signara_backup_remote_enabled` and alerted on as `BackupIsLocalOnly`, so
+local-only backups are visible rather than reassuring. Verify durability with
+`scripts/restore-drill.sh` (Docker-only, non-destructive — it uses its own
+throwaway containers) and record the run in [DisasterRecovery.md](DisasterRecovery.md) §4.
 
 ## 2. DNS, TLS, and NGINX via Cerulean
 

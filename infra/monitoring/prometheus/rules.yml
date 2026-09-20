@@ -140,3 +140,18 @@ groups:
         annotations:
           summary: 'No successful backup in 36 hours'
           description: 'Last successful backup was {{ $value | humanizeDuration }} ago. See docs/DisasterRecovery.md.'
+
+      # Backups that only exist on the host they back up pass every other check
+      # here: they run, they are fresh, they are complete, and they die with the
+      # box. That is how the estate lost a platform's entire history (see
+      # 1-primary/sign/ARCHIVE.md §8), so "no off-host copy" gets its own alert
+      # rather than a line in a log nobody reads.
+      - alert: BackupIsLocalOnly
+        expr: signara_backup_remote_enabled == 0
+        for: 6h
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: 'Backups are not leaving this host'
+          description: 'No off-host mirror is configured, so these backups do not survive losing this host. Set BACKUP_S3_* to a store on another host (docs/DisasterRecovery.md §2) and BACKUP_REQUIRE_REMOTE=true, then run scripts/restore-drill.sh.'
