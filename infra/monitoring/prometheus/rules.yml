@@ -175,6 +175,18 @@ groups:
           summary: 'The off-host mirror has not completed in 36 hours'
           description: 'Last successful mirror was {{ $value | humanizeDuration }} ago. The local dumps may be current while the copy that survives this host is not.'
 
+      # An identity backup that is not being taken is worse than one that fails:
+      # it is discovered on the day someone tries to log in to the restored stack.
+      - alert: IdentityDatabaseNotBackedUp
+        expr: signara_backup_identity_covered == 0
+        for: 6h
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: 'Backups do not include the identity database'
+          description: 'AUTHENTIK_POSTGRES_PASSWORD is unset, so the dumps contain no logins: a restore returns the documents without the accounts that reach them. Point it at the identity database (docs/DisasterRecovery.md §2).'
+
       - alert: BackupMirrorNeverCompleted
         expr: |
           signara_backup_remote_enabled == 1

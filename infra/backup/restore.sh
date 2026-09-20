@@ -48,8 +48,14 @@ if [[ -z "$AUTHENTIK_DUMP" && -n "${BACKUP_TIMESTAMP:-}" && -n "${BACKUP_S3_ENDP
   : "${BACKUP_S3_SECRET_KEY:?BACKUP_S3_SECRET_KEY is required for remote restore}"
   : "${BACKUP_S3_BUCKET:?BACKUP_S3_BUCKET is required for remote restore}"
   mc alias set backup "$BACKUP_S3_ENDPOINT" "$BACKUP_S3_ACCESS_KEY" "$BACKUP_S3_SECRET_KEY" >/dev/null
-  mc cp "backup/$BACKUP_S3_BUCKET/authentik/authentik-db-${BACKUP_TIMESTAMP}.dump" "$BACKUP_DIR/"
-  AUTHENTIK_DUMP="$BACKUP_DIR/authentik-db-${BACKUP_TIMESTAMP}.dump"
+  # Absent is a legitimate state (see backup.sh): not every deployment keeps its
+  # identity database in this stack, so a missing identity dump must not abort a
+  # restore that is otherwise complete for Signara's own data.
+  if mc cp "backup/$BACKUP_S3_BUCKET/authentik/authentik-db-${BACKUP_TIMESTAMP}.dump" "$BACKUP_DIR/" 2>/dev/null; then
+    AUTHENTIK_DUMP="$BACKUP_DIR/authentik-db-${BACKUP_TIMESTAMP}.dump"
+  else
+    echo "[restore] the mirror has no identity dump for $BACKUP_TIMESTAMP; restoring Signara only" >&2
+  fi
 fi
 if [[ -n "$AUTHENTIK_DUMP" && -f "$AUTHENTIK_DUMP" ]]; then
   PGPASSWORD="${AUTHENTIK_POSTGRES_PASSWORD:?AUTHENTIK_POSTGRES_PASSWORD is required}" pg_restore \
