@@ -239,26 +239,42 @@ stale references.
       (2026-09-20) runs seed mode monthly and keeps the log as an artifact, so the
       restore path is exercised between operator drills rather than only when someone
       remembers to run it.
-- [ ] Monitoring on the api/web/queue — **deferred by decision (2026-09-20).**
-      Nothing on the host evaluates the rules right now: no Prometheus, Alertmanager,
-      Grafana or Loki runs there, so the alerts this workstream added — including
-      `BackupIsLocalOnly` and `IdentityDatabaseNotBackedUp` — are written, tested and
-      inert. The backup metrics endpoint does serve them (`backup-metrics:9101`,
-      verified). Revisit when the estate runs a shared monitoring stack, and route
-      alerts to a real receiver first: `alertmanager.yml`'s default receiver has no
-      destination.
-- [x] **An upgrade path written down** — `docs/Deployment.md` §6 (2026-09-20),
-      including the reading that matters most: the deployment does **not** run
-      registry images. Both containers report no `RepoDigests` and the local
-      `:latest` was built on the host on 2026-09-08, so it is a different artifact
-      from CI's `latest`, and the running API/web predate the harvested locales.
-      §6.1 and §6.2 are the two routes (host build, or pin `sha-<commit>` and pull);
-      §6.3–§6.5 cover forward-only migrations, verification, and rollback.
+- [~] Monitoring on the api/web/queue — **Prometheus and Alertmanager now run on
+  the host (2026-09-20); delivery is still open.** All three scrape targets are
+  up (`signara-api`, `signara-backup`, `prometheus`) and the rules evaluate: the
+  only alert firing is `BackupIsLocalOnly`, which is the correct reading, not a
+  false positive. Starting it exposed two defects, both fixed: the MinIO scrape
+  job could only ever be down (the store is retired and profile-gated), so
+  `StorageEndpointDown` was a permanent false critical; and `alertmanager.yml`
+  used `${SMTP_PASSWORD}` against `smtp.example.com`, which Alertmanager cannot
+  expand — `amtool check-config` reported SUCCESS on it while the receiver sent
+  nowhere. The config is now rendered from `.env` at container start.
+  **Still open: a destination.** The estate has no working mail path — every
+  `SMTP_HOST` across the stacks is empty, no relay credentials exist, and
+  outbound port 25 is blocked, so direct-to-MX delivery is impossible and the
+  container warns that it cannot deliver. Alerts are visible in the Alertmanager
+  UI (loopback, unauthenticated) meanwhile. Needs an authenticated relay on 587
+  or a webhook; then set `SMTP_HOST`/`SMTP_USER`/`SMTP_PASS` and
+  `ALERT_EMAIL_TO`.
+- [x] **An upgrade path written down** — `docs/Deployment.md` §6 (2026-09-20).
+      Its original reading was **wrong and has been corrected**: the deployment did
+      run registry images (both containers carried `RepoDigests` into images CI
+      built on 2026-09-07), not a host build — the earlier check inspected image
+      names that did not exist on the host and concluded "no `RepoDigests`" from
+      that. The real defect was in CI: `docker-build.yml` passed no
+      `NEXT_PUBLIC_*` build args, so the published web image inlined the
+      Dockerfile's `localhost` defaults and every deployment of it was broken in
+      the browser. Fixed, with smoke-test coverage; the host now runs a host build
+      of current `main` instead. §6.1 and §6.2 are the two routes (host build, or
+      pin `sha-<commit>` and pull); §6.3–§6.5 cover forward-only migrations,
+      verification, and rollback.
 
 **Exit:** the restore drill is a dated entry in the DR doc, not a plan — **met,
 including against a production dump on the deployment host.** What remains is
 durability rather than procedure: (1) the mirror has to leave this host, and (2)
-monitoring and the upgrade path below. Until the mirror is off-host, the RTO of
+monitoring delivery — the stack now runs, but nothing can be sent anywhere until a
+relay exists (see the monitoring item above). The upgrade path is written
+(`docs/Deployment.md` §6). Until the mirror is off-host, the RTO of
 ≤ 4 h is an estimate for anything that takes the machine with it.
 
 ## 4. Phase plan
