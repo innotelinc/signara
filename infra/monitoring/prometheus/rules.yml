@@ -146,12 +146,43 @@ groups:
       # box. That is how the estate lost a platform's entire history (see
       # 1-primary/sign/ARCHIVE.md §8), so "no off-host copy" gets its own alert
       # rather than a line in a log nobody reads.
+      #
+      # This keys on mirror_offhost, not on remote_enabled: a mirror on the same
+      # host (or one whose host cannot be shown to be elsewhere) sets
+      # remote_enabled=1 while providing no durability, and must not silence it.
       - alert: BackupIsLocalOnly
-        expr: signara_backup_remote_enabled == 0
+        expr: signara_backup_mirror_offhost == 0
         for: 6h
         labels:
           severity: warning
           team: platform
         annotations:
-          summary: 'Backups are not leaving this host'
-          description: 'No off-host mirror is configured, so these backups do not survive losing this host. Set BACKUP_S3_* to a store on another host (docs/DisasterRecovery.md §2) and BACKUP_REQUIRE_REMOTE=true, then run scripts/restore-drill.sh.'
+          summary: 'Backups are not proven to leave this host'
+          description: 'No off-host mirror is configured, the mirror resolves to an address listed in BACKUP_LOCAL_ADDRESSES, or BACKUP_LOCAL_ADDRESSES is unset so off-host cannot be shown. These backups do not survive losing this host. See docs/DisasterRecovery.md §2, then run scripts/restore-drill.sh.'
+
+      # A mirror that is enabled but never completed, or completed too long ago,
+      # is the quieter version of the same failure.
+      - alert: BackupMirrorStale
+        expr: |
+          signara_backup_remote_enabled == 1
+          and
+          (time() - signara_backup_remote_last_success_timestamp) > 36 * 60 * 60
+        for: 30m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: 'The off-host mirror has not completed in 36 hours'
+          description: 'Last successful mirror was {{ $value | humanizeDuration }} ago. The local dumps may be current while the copy that survives this host is not.'
+
+      - alert: BackupMirrorNeverCompleted
+        expr: |
+          signara_backup_remote_enabled == 1
+          unless on() signara_backup_remote_last_success_timestamp
+        for: 1h
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: 'An off-host mirror is configured but has never completed'
+          description: 'BACKUP_S3_ENDPOINT is set, yet no run has ever mirrored a backup successfully. Check the backup logs for the failure, or unset the mirror so the gap is at least honest.'
