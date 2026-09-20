@@ -126,10 +126,24 @@ fi
 : "${SOURCE_S3_SECRET_KEY:?SOURCE_S3_SECRET_KEY is required for object backup}"
 : "${SOURCE_S3_BUCKET:?SOURCE_S3_BUCKET is required for object backup}"
 
-log "Creating a local MinIO object archive..."
-mc alias set source "$SOURCE_S3_ENDPOINT" "$SOURCE_S3_ACCESS_KEY" "$SOURCE_S3_SECRET_KEY" >/dev/null
-mc mb --ignore-existing "source/$SOURCE_S3_BUCKET" >/dev/null
-mc mirror --overwrite "source/$SOURCE_S3_BUCKET" "$OBJECT_BACKUP_DIR"
+# rclone, not mc, for every object transfer — reads included. The estate's object
+# store refuses streaming SigV4 uploads (services/objectstore/sigv4.go answers 501
+# for a STREAMING-* payload hash) and mc streams every PUT, so `mc cp` against it
+# fails with "streaming SigV4 payloads are not supported" whatever flags it is
+# given — verified against the running store, where it broke the mirror. rclone
+# signs plain payloads, and it is already the estate's S3 client of record:
+# onyx-objectstore tiers buckets through it. One client for both directions also
+# means a mirror cannot be written in a way it cannot be read back.
+source_flags=(--config /dev/null --log-level ERROR --s3-provider Other
+  --s3-endpoint "$SOURCE_S3_ENDPOINT" --s3-access-key-id "$SOURCE_S3_ACCESS_KEY"
+  --s3-secret-access-key "$SOURCE_S3_SECRET_KEY" --s3-force-path-style)
+if [[ -n "${SOURCE_S3_REGION:-}" ]]; then
+  source_flags+=(--s3-region "$SOURCE_S3_REGION")
+fi
+
+log "Creating a local archive of the source bucket..."
+rclone "${source_flags[@]}" mkdir ":s3:$SOURCE_S3_BUCKET"
+rclone "${source_flags[@]}" copy ":s3:$SOURCE_S3_BUCKET" "$OBJECT_BACKUP_DIR"
 
 if [[ -n "${BACKUP_S3_ENDPOINT:-}" || -n "${BACKUP_S3_ACCESS_KEY:-}" || -n "${BACKUP_S3_SECRET_KEY:-}" ]]; then
   if [[ -z "${BACKUP_S3_ENDPOINT:-}" || -z "${BACKUP_S3_ACCESS_KEY:-}" || -z "${BACKUP_S3_SECRET_KEY:-}" ]]; then
@@ -139,17 +153,30 @@ if [[ -n "${BACKUP_S3_ENDPOINT:-}" || -n "${BACKUP_S3_ACCESS_KEY:-}" || -n "${BA
   : "${BACKUP_S3_BUCKET:?BACKUP_S3_BUCKET is required for remote backup}"
   REMOTE_CONFIGURED=true
 
-  log "Mirroring the local backup archive to remote S3..."
-  mc alias set backup "$BACKUP_S3_ENDPOINT" "$BACKUP_S3_ACCESS_KEY" "$BACKUP_S3_SECRET_KEY" >/dev/null
-  mc mb --ignore-existing "backup/$BACKUP_S3_BUCKET" >/dev/null
-  mc mirror --overwrite "$OBJECT_BACKUP_DIR" "backup/$BACKUP_S3_BUCKET/minio/$TIMESTAMP"
-  mc cp --quiet "$BACKUP_DIR/db-${TIMESTAMP}.dump" "backup/$BACKUP_S3_BUCKET/postgres/"
-  if [[ "$IDENTITY_COVERED" == 1 ]]; then
-    mc cp --quiet "$BACKUP_DIR/authentik-db-${TIMESTAMP}.dump" "backup/$BACKUP_S3_BUCKET/authentik/"
+  # Same client and the same reason as the source bucket above.
+  mirror_flags=(--config /dev/null --log-level ERROR --s3-provider Other
+    --s3-endpoint "$BACKUP_S3_ENDPOINT" --s3-access-key-id "$BACKUP_S3_ACCESS_KEY"
+    --s3-secret-access-key "$BACKUP_S3_SECRET_KEY" --s3-force-path-style)
+  if [[ -n "${BACKUP_S3_REGION:-}" ]]; then
+    mirror_flags+=(--s3-region "$BACKUP_S3_REGION")
   fi
-  mc rm --recursive --force --older-than "${RETENTION_DAYS}d" "backup/$BACKUP_S3_BUCKET/minio" >/dev/null 2>&1 || true
-  mc rm --recursive --force --older-than "${RETENTION_DAYS}d" "backup/$BACKUP_S3_BUCKET/postgres" >/dev/null 2>&1 || true
-  mc rm --recursive --force --older-than "${RETENTION_DAYS}d" "backup/$BACKUP_S3_BUCKET/authentik" >/dev/null 2>&1 || true
+  mirror=":s3:$BACKUP_S3_BUCKET"
+
+  log "Mirroring the local backup archive to remote S3..."
+  rclone "${mirror_flags[@]}" mkdir "$mirror"
+  rclone "${mirror_flags[@]}" copy "$OBJECT_BACKUP_DIR" "$mirror/minio/$TIMESTAMP"
+  rclone "${mirror_flags[@]}" copyto "$BACKUP_DIR/db-${TIMESTAMP}.dump" \
+    "$mirror/postgres/db-${TIMESTAMP}.dump"
+  if [[ "$IDENTITY_COVERED" == 1 ]]; then
+    rclone "${mirror_flags[@]}" copyto "$BACKUP_DIR/authentik-db-${TIMESTAMP}.dump" \
+      "$mirror/authentik/authentik-db-${TIMESTAMP}.dump"
+  fi
+  # Age is the object's own timestamp as the store reports it, which is when it
+  # was mirrored; `--leave-root` keeps the bucket prefixes themselves.
+  for prefix in minio postgres authentik; do
+    rclone "${mirror_flags[@]}" delete --min-age "${RETENTION_DAYS}d" "$mirror/$prefix" || true
+    rclone "${mirror_flags[@]}" rmdirs --leave-root "$mirror/$prefix" || true
+  done
   REMOTE_OK=true
 
   mirror_host="$(endpoint_host "$BACKUP_S3_ENDPOINT")"
