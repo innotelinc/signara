@@ -132,7 +132,12 @@ one item: a mirror on another host (with `BACKUP_LOCAL_ADDRESSES` naming this on
 until `signara_backup_mirror_offhost` reads 1 and `BackupIsLocalOnly` clears. Until
 then the RTO of ≤ 4 h is an estimate for anything that takes the host with it.
 
-- **Monthly**: rerun the drill above and add a row to the table.
+- **Monthly**: `.github/workflows/restore-drill.yml` runs seed mode on the first
+  of the month and keeps its log as an artifact, so the path cannot rot quietly
+  between operator drills. Add a row to the table only for drills with real data
+  — CI has none to restore, which is the point of it being safe to run there.
+- **Monthly (operator)**: rerun the drill above against a dump fetched from the
+  mirror, on the deployment host, and add a row to the table.
 - **Quarterly**: full instance burn-in on a scratch host, including signing a
   test envelope and generating an evidence report.
 
