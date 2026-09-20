@@ -310,6 +310,10 @@ services:
       - ./infra/monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./infra/monitoring/prometheus/rules.yml:/etc/prometheus/rules.yml:ro
       - promdata:/prometheus
+    # Bound to loopback, not published: Prometheus has no authentication, and
+    # its UI and query API expose every metric in the estate.
+    ports:
+      - '${PROMETHEUS_BIND_ADDRESS:-127.0.0.1}:${PROMETHEUS_BIND_PORT:-9090}:9090'
     depends_on:
       - api
     logging: *logging-default
@@ -344,12 +348,23 @@ services:
   alertmanager:
     image: prom/alertmanager:v0.27.0
     restart: unless-stopped
-    command:
-      - --config.file=/etc/alertmanager/alertmanager.yml
-      - --storage.path=/alertmanager
+    # The config carries ${...} placeholders that Alertmanager cannot expand
+    # itself, so the entrypoint renders it before exec'ing the binary — without
+    # that step the receiver silently sends nowhere. See the script's header.
+    entrypoint: ['/bin/sh', '/etc/alertmanager/entrypoint.sh']
+    environment:
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      ALERT_EMAIL_TO: ${ALERT_EMAIL_TO:-}
     volumes:
       - ./infra/monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - ./infra/monitoring/alertmanager/entrypoint.sh:/etc/alertmanager/entrypoint.sh:ro
       - alertdata:/alertmanager
+    ports:
+      - '${ALERTMANAGER_BIND_ADDRESS:-127.0.0.1}:${ALERTMANAGER_BIND_PORT:-9093}:9093'
     logging: *logging-default
 
   # --------------------------------------------------------------- backup ---
