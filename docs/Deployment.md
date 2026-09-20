@@ -89,12 +89,12 @@ retired store can be stopped without the API refusing to boot.
 Documents live in an S3-compatible store selected entirely from `.env`. Moving
 stores is a configuration change, not a code change.
 
-| Variable | Purpose |
-| --- | --- |
-| `SIGNARA_S3_ENDPOINT` | Where the API reads and writes. Currently `http://172.17.0.1:2090`. |
-| `SIGNARA_S3_BUCKET` | Bucket holding document objects (default `signara-documents`). |
-| `SIGNARA_S3_ACCESS_KEY` / `SIGNARA_S3_SECRET_KEY` | Credentials for that store. |
-| `SIGNARA_S3_PUBLIC_ENDPOINT` | Host that browser-facing presigned URLs are signed for. |
+| Variable                                          | Purpose                                                             |
+| ------------------------------------------------- | ------------------------------------------------------------------- |
+| `SIGNARA_S3_ENDPOINT`                             | Where the API reads and writes. Currently `http://172.17.0.1:2090`. |
+| `SIGNARA_S3_BUCKET`                               | Bucket holding document objects (default `signara-documents`).      |
+| `SIGNARA_S3_ACCESS_KEY` / `SIGNARA_S3_SECRET_KEY` | Credentials for that store.                                         |
+| `SIGNARA_S3_PUBLIC_ENDPOINT`                      | Host that browser-facing presigned URLs are signed for.             |
 
 `S3_*` **without** the prefix is a different thing: MinIO's own root credentials,
 left untouched so the retired store can be started again for a rollback. Compose
@@ -114,23 +114,34 @@ Then change `SIGNARA_S3_*` and run
 `docker compose -f docker-compose.prod.yml -f docker-compose.override.prod.yml up -d --no-deps api`.
 Verify the store itself with `scripts/onyx-objectstore-smoke.sh` (plain REST, no
 client library in the way) and `scripts/onyx-s3-test.mjs` (a real S3 SDK); verify
-the *browser* path by presigning an object for `SIGNARA_S3_PUBLIC_ENDPOINT` and
+the _browser_ path by presigning an object for `SIGNARA_S3_PUBLIC_ENDPOINT` and
 fetching it through the edge, then comparing it to the document's
 `checksumSha256`.
 
 ### Backups
 
-The production stack includes a backup container for PostgreSQL, Authentik, and the
-object store the API actually uses. Each run writes database dumps and an object
-archive to the persistent `backupcache` volume. Configure all `BACKUP_S3_*`
-variables for an off-host mirror and `BACKUP_RETENTION_DAYS` for retention; set
-`BACKUP_REQUIRE_REMOTE=true` so a missing mirror **fails** the run instead of
-downgrading it to local-only.
+The production stack includes a backup container for PostgreSQL, the identity
+database, and the object store the API actually uses. Each run writes database
+dumps and an object archive to the persistent `backupcache` volume. Configure all
+`BACKUP_S3_*` variables for an off-host mirror and `BACKUP_RETENTION_DAYS` for
+retention; set `BACKUP_REQUIRE_REMOTE=true` so a missing mirror **fails** the run
+instead of downgrading it to local-only.
+
+The identity database is dumped when `AUTHENTIK_POSTGRES_PASSWORD` is set, since
+it is not part of every deployment: in this estate Authentik belongs to Cerulean,
+and the production overlay joins that stack's network to reach it. Coverage is
+reported as `signara_backup_identity_covered`, so a stack whose dumps contain no
+logins says so instead of looking complete.
 
 A mirror is required, not optional: the `backupcache` volume sits on the host whose
-database it protects. Whether one is configured is reported as
-`signara_backup_remote_enabled` and alerted on as `BackupIsLocalOnly`, so
-local-only backups are visible rather than reassuring. Verify durability with
+database it protects. Whether that mirror is _somewhere else_ is what
+`signara_backup_mirror_offhost` reports and `BackupIsLocalOnly` alerts on —
+`remote_enabled` says only that credentials were configured, and a mirror on the
+same host reads as a success while adding no durability. Off-host is proven rather
+than assumed: the job resolves the mirror endpoint and compares it against
+`BACKUP_LOCAL_ADDRESSES`, which has to list this host's addresses. Object
+transfers to and from the mirror use `rclone`, because ONYX refuses the streaming
+SigV4 payloads `mc` sends for every PUT. Verify durability with
 `scripts/restore-drill.sh` (Docker-only, non-destructive — it uses its own
 throwaway containers) and record the run in [DisasterRecovery.md](DisasterRecovery.md) §4.
 
@@ -171,12 +182,12 @@ make cerulean-provision
 
 The checked-in map at `infra/cerulean/hosts.conf` provisions:
 
-| Hostname                     | DNS A record | NPM upstream   |
-| ---------------------------- | ------------ | -------------- |
-| `app.signara.innotel.us`     | WAN IP       | LAN IP `:3000` |
-| `api.signara.innotel.us`     | WAN IP       | LAN IP `:8000` |
-| `auth.signara.innotel.us`    | WAN IP       | LAN IP `:9100` |
-| `admin.signara.innotel.us`   | WAN IP       | LAN IP `:81`   |
+| Hostname                     | DNS A record | NPM upstream    |
+| ---------------------------- | ------------ | --------------- |
+| `app.signara.innotel.us`     | WAN IP       | LAN IP `:3000`  |
+| `api.signara.innotel.us`     | WAN IP       | LAN IP `:8000`  |
+| `auth.signara.innotel.us`    | WAN IP       | LAN IP `:9100`  |
+| `admin.signara.innotel.us`   | WAN IP       | LAN IP `:81`    |
 | `storage.signara.innotel.us` | WAN IP       | docker0 `:2090` |
 
 `storage` backs the browser-facing presigned document URLs (`S3_PUBLIC_ENDPOINT`),
@@ -206,12 +217,12 @@ The automation at `infra/nginx/npm-proxy-hosts.py` creates or updates proxy
 hosts and can request the wildcard certificate. Run it directly or through
 `./setup.sh --with-nginx`.
 
-| Hostname                     | Backend                                              |
-| ---------------------------- | ---------------------------------------------------- |
-| `app.signara.innotel.us`     | web `:3000`                                          |
-| `api.signara.innotel.us`     | api `:8000`                                          |
-| `auth.signara.innotel.us`    | Authentik host port `:9100` (container port `:9000`) |
-| `admin.signara.innotel.us`   | NPM admin UI or administration app                   |
+| Hostname                     | Backend                                                |
+| ---------------------------- | ------------------------------------------------------ |
+| `app.signara.innotel.us`     | web `:3000`                                            |
+| `api.signara.innotel.us`     | api `:8000`                                            |
+| `auth.signara.innotel.us`    | Authentik host port `:9100` (container port `:9000`)   |
+| `admin.signara.innotel.us`   | NPM admin UI or administration app                     |
 | `storage.signara.innotel.us` | onyx-objectstore `172.17.0.1:2090` (container `:9000`) |
 
 ```bash
