@@ -33,10 +33,11 @@ scrape_configs:
         labels:
           service: signara-backup
 
-  # MinIO exposes Prometheus metrics on the API endpoint
-  - job_name: 'signara-minio'
-    metrics_path: /minio/v2/metrics/cluster
-    static_configs:
-      - targets: ['minio:9000']
-        labels:
-          service: minio
+  # There is deliberately no scrape job for object storage. MinIO was retired
+  # as the primary store (docs/Roadmap.md W3) and is profile-gated behind
+  # `legacy-storage`, so its target could only ever be down — a permanently
+  # firing StorageEndpointDown, which trains people to ignore alerts. The store
+  # Signara actually uses is the estate's onyx-objectstore, which exposes no
+  # Prometheus text metrics to scrape. Store failures still surface, through the
+  # API's 5xx rate (ApiHighErrorRate) and through the backup job, which reads
+  # the same store and reports signara_backup_last_status.

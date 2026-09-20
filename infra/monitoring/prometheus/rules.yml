@@ -1,7 +1,14 @@
 # ==========================================================================
 # Signara alert rules
-# Five required categories: API failures, queue failures, certificate
-# expiration, storage failures, backup failures.
+# Categories: API failures, queue failures, certificate expiration, backup
+# failures.
+#
+# There is no object-storage category. MinIO was retired as the primary store
+# (docs/Roadmap.md W3) and the store that replaced it exposes no metrics, so a
+# storage rule could only have keyed on a target that never comes up — see the
+# note in prometheus.yml. Store failures are covered indirectly and honestly:
+# a dead store makes the API return 5xx (ApiHighErrorRate) and makes the backup
+# job fail (BackupJobFailed), because the backup reads the same store.
 # ==========================================================================
 groups:
   - name: signara-api
@@ -95,29 +102,6 @@ groups:
         annotations:
           summary: 'TLS certificate has expired'
           description: "Signing certificate '{{ $labels.certificate }}' has expired. Rotate or revoke it now."
-
-  - name: signara-storage
-    rules:
-      - alert: StorageEndpointDown
-        expr: up{job="signara-minio"} == 0
-        for: 5m
-        labels:
-          severity: critical
-          team: platform
-        annotations:
-          summary: 'MinIO / object storage is unreachable'
-
-      - alert: StorageAlmostFull
-        expr: |
-          (minio_cluster_capacity_usable_total_bytes - minio_cluster_capacity_usable_free_bytes)
-            / minio_cluster_capacity_usable_total_bytes
-          > 0.85
-        for: 10m
-        labels:
-          severity: warning
-          team: platform
-        annotations:
-          summary: 'Object storage above 85% capacity'
 
   - name: signara-backups
     rules:
