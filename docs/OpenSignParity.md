@@ -64,6 +64,55 @@ these exists:
 | A field with no name yet                                                                      | "Unnamed Signature Field"                                                                                                  |
 | Required fields                                                                               | "Please fill out this field"                                                                                               |
 
+### Where #81 landed (2026-09-21)
+
+The vocabulary mapped onto `FieldType`, and the row closed as far as a placement can
+be carried — from the editor, through the request, to the signer and into the
+evidence. Re-measured against the shipped code rather than the plan:
+
+| OpenSign catalog type | `FieldType`  | Reaches a signer                         |
+| --------------------- | ------------ | ---------------------------------------- |
+| `signature`           | `SIGNATURE`  | yes                                      |
+| `initials`            | `INITIAL`    | yes                                      |
+| `name`                | `NAME`       | yes                                      |
+| `job title`           | `JOB_TITLE`  | yes                                      |
+| `company`             | `COMPANY`    | yes                                      |
+| `date`                | `DATE`       | yes                                      |
+| `text`                | `TEXT`       | yes                                      |
+| `text input`          | `TEXT`       | yes (mapped to the same type)            |
+| `checkbox`            | `CHECKBOX`   | yes                                      |
+| `dropdown`            | `DROPDOWN`   | yes                                      |
+| `email`               | `EMAIL`      | yes                                      |
+| `attachments`         | `ATTACHMENT` | **no** — placeable, refused at send time |
+| `cells`               | —            | no — not placeable                       |
+| `stamp`               | —            | no — not placeable                       |
+| `radio button`        | —            | no — not placeable                       |
+| `image`               | —            | no — not placeable                       |
+| `number`              | —            | no — not placeable                       |
+| `draw`                | —            | no — not placeable                       |
+
+**11 of 18 reach a signer, 1 is placeable but refused, 6 cannot be placed.** A
+`PHONE`, `ADDRESS` and `CUSTOM` type exist in Signara that the fork did not have.
+
+Attachments are the deliberate exception and are refused by the API at send time
+with that reason, rather than handed to a signer as a required field they can
+never satisfy. Collecting an uploaded file into a request needs retention,
+scanning and access control of its own; recording a file _name_ would put a claim
+in the evidence the bytes do not support.
+
+Of the eight behaviours the strings imply, **two exist**: required fields are
+enforced in the signing room _and_ in the API (a signature is refused while a
+required placement is blank), and an unnamed placement is named after its type.
+The other six — AcroForm detection on upload, conditional visibility, prefill,
+cross-field formulas, the duplicate-name warning, and CSV/bulk value validation —
+are **not implemented**. Five of them — AcroForm detection, conditional
+visibility, prefill, cross-field formulas, and the duplicate-name warning — are
+editor work, and the sixth, CSV/bulk value validation, belongs with bulk send
+(#86, itself an open decision). One is partly structural rather than missing: a
+placement is bound to exactly one signer by construction, so a name cannot end up
+shared between signers — but the editor does not warn about a duplicate name at
+authoring time either.
+
 ## 2. Mail identity — issue #83
 
 What the old platform shipped as its defaults, verbatim, with the placeholders it
@@ -160,15 +209,15 @@ Two things worth carrying explicitly:
 
 ## 4. Carried, and not carried
 
-| Asset                                                    | Verdict                                                                                         |
-| -------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| UI translations, 7 locales                               | **Carried** — `apps/web/public/locales/`, byte-identical, provenance in that directory's README |
-| Field vocabulary, mail strings, certificate layout       | **Carried as this document**, tracked by issues #81, #83, #84                                   |
-| Feature inventory of the old product                     | **Carried** as roadmap §W2 and issues #81–#92                                                   |
-| Data mapping and storage reasoning                       | **Retained** in `sign/CONVERGENCE.md` §4–§5 as the historical record                            |
-| PDF signing implementation (`PDF.js`, PFX, `/ByteRange`) | **Not carried** — `sign/ARCHIVE.md` §1, deliberately                                            |
-| OpenSign UI and server trees                             | **Not carried** — upstream `opensignlabs/opensign` is canonical                                 |
-| Deployment config for the retired host                   | **Not carried** — dead with that host (`sign/ARCHIVE.md` §3)                                    |
+| Asset                                                    | Verdict                                                                                                                             |
+| -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| UI translations, 7 locales                               | **Carried** — `apps/web/public/locales/`, byte-identical, provenance in that directory's README                                     |
+| Field vocabulary, mail strings, certificate layout       | **Carried as this document**; the vocabulary is now implemented in code (#81, 2026-09-21), the other two are tracked by #83 and #84 |
+| Feature inventory of the old product                     | **Carried** as roadmap §W2 and issues #81–#92                                                                                       |
+| Data mapping and storage reasoning                       | **Retained** in `sign/CONVERGENCE.md` §4–§5 as the historical record                                                                |
+| PDF signing implementation (`PDF.js`, PFX, `/ByteRange`) | **Not carried** — `sign/ARCHIVE.md` §1, deliberately                                                                                |
+| OpenSign UI and server trees                             | **Not carried** — upstream `opensignlabs/opensign` is canonical                                                                     |
+| Deployment config for the retired host                   | **Not carried** — dead with that host (`sign/ARCHIVE.md` §3)                                                                        |
 
 ---
 

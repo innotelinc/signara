@@ -13,6 +13,7 @@ class TemplateFieldDto implements TemplateFieldInput {
   @IsOptional() @IsString() key?: string;
   @IsOptional() @IsBoolean() isRequired?: boolean;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) pageNumber?: number;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(0) assigneeOrder?: number;
   @IsOptional() @Type(() => Number) @IsInt() x?: number;
   @IsOptional() @Type(() => Number) @IsInt() y?: number;
   @IsOptional() @Type(() => Number) @IsInt() width?: number;

@@ -14,6 +14,8 @@ export interface TemplateFieldInput {
   key?: string;
   isRequired?: boolean;
   pageNumber?: number;
+  /** Which signer fills this field, by order index (0 = first signer). */
+  assigneeOrder?: number;
   x?: number;
   y?: number;
   width?: number;
@@ -166,6 +168,7 @@ export class TemplatesService {
       key: f.key,
       isRequired: f.isRequired ?? true,
       pageNumber: f.pageNumber ?? 1,
+      assigneeOrder: f.assigneeOrder ?? 0,
       x: f.x,
       y: f.y,
       width: f.width,

@@ -111,7 +111,7 @@ completion mail subjects and bodies #83 has to keep, and the certificate layout
 | Capability                                     | Evidence in Signara today                                                                                                                                                                                                                                                                                  | Gap to close                                                                                                                                  |
 | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
 | Upload / versions / download                   | `documents` controller: `upload`, `:id`, `:id/download`, `:id/versions`                                                                                                                                                                                                                                    | —                                                                                                                                             |
-| Templates + fields                             | `templates` module; web `/templates`, `/templates/new`, `/templates/[id]`; `TemplateField` model                                                                                                                                                                                                           | verify field placement editor covers all OpenSign field types                                                                                 |
+| Templates + fields                             | `templates` module; web `/templates`, `/templates/new`, `/templates/[id]`; `TemplateField` model + `assigneeOrder`, `RequestField` placements, and a signing room that renders and records what each signer must fill **landed 2026-09-21** (#81)                                                          | placement reaches the signer and the evidence end to end, in every type but attachments                                                       |
 | Send for signature (sequential/parallel)       | `signatures`: `POST /requests`, `GET /requests`, `:id/cancel`, `:id/remind`, `:id/evidence`                                                                                                                                                                                                                | —                                                                                                                                             |
 | Guest signing without an account               | `/sign/[token]`, `POST /signatures/public/:token/sign`                                                                                                                                                                                                                                                     | —                                                                                                                                             |
 | Reminders / escalation                         | `:id/remind`, `WorkflowRule`, and a scheduled sweep (`sweepDueReminders`, repeatable `signing` queue job) — **landed 2026-09-20** (#82)                                                                                                                                                                    | —                                                                                                                                             |
@@ -129,12 +129,12 @@ completion mail subjects and bodies #83 has to keep, and the certificate layout
 | Admin/ops view                                 | `admin`: orgs, users, status, `metrics`                                                                                                                                                                                                                                                                    | —                                                                                                                                             |
 
 **Exit:** every row is either **shipped**, **decided out of scope with a reason**,
-or **scheduled** — nothing is "unknown". Status: 9 rows shipped (upload,
+or **scheduled** — nothing is "unknown". Status: 10 rows shipped (upload,
 versions, download; send for signature; guest signing; audit trail; admin/ops;
 reminders — #82, 2026-09-20; outbound webhooks — #85, 2026-09-20; in-person
-signing — #88, 2026-09-21), **9 still filed as issues #81, #83–#87, #89–#92** —
-6 gaps and 3 decisions (bulk send, cloud-storage import, SMS/WhatsApp), plus the
-billing question in §8.
+signing — #88, 2026-09-21; templates + fields — #81, 2026-09-21), **8 still filed
+as issues #83–#87, #89–#92** — 5 gaps and 3 decisions (bulk send, cloud-storage
+import, SMS/WhatsApp), plus the billing question in §8.
 Two tracker premises were stale and are corrected on the issues: #91 (the
 locales exist — 7 catalogs shipped 2026-09-20) and #82 (the manual reminder was
 also sending the _invite_ template, because the enqueued job never said it was a
@@ -154,6 +154,43 @@ turn". One limit worth stating: a signer's address is still required, because it
 is the identity record the content hash binds and the mailbox a completion notice
 would use — so "no email round trip" means no invitation is _delivered_, not that
 Signara learns nothing about who signed.
+
+**What #81 turned out to be, and what it now covers.** The row read "verify the
+field-placement editor covers every OpenSign field type", and the vocabulary was
+the small half: 12 of OpenSign's 18 catalog types were placeable. The editor was
+**inert**. A placement was saved to `TemplateField` and nothing read it;
+`Document.templateId` existed but no code path ever wrote it, so documents were
+uploaded with no template link; `fieldsForDocument()` returned `[]` behind a
+comment calling itself a placeholder; and the signing room declared
+`requestedFields: unknown[]` and never read it. A signer saw a PDF and a Sign
+button — no placed field ever reached them, and no placed value ever entered the
+evidence.
+
+The missing decision was **which signer owns a placed field**: `TemplateField`
+had a `key` but no signer binding, while OpenSign assigned every widget to one, so
+hydration was ambiguous until it was settled. It is now a property of the
+placement (`TemplateField.assigneeOrder`, by the request's signer order), and at
+send time the placements are **copied** onto the request as `RequestField` rows
+bound to concrete signer rows. A copy, not a reference: `TemplatesService.update`
+replaces a template's fields wholesale, and a live request's placements — and a
+signed request's evidence — must not be rewritten by someone editing the template
+afterwards. A field aimed at a signer the request does not have **refuses the
+send** rather than being silently dropped, which is the failure mode this row was
+really about.
+
+What a signer now sees and what the evidence now holds: the room renders their
+fields by type (text, name, e-mail, phone, date, checkbox, dropdown, address,
+initial, signature, company, job title, custom), marks required ones, and will not
+record a signature while a required one is blank — enforced in the API as well as
+the page. Values are stored as JSON, so a checkbox stays a boolean rather than a
+flattened string, and each carries a `filledAt` timestamp; the evidence report
+returns them per signer and the SIGNED event records how many were captured.
+**One type is deliberately still short of end-to-end: `ATTACHMENT`.** It can be
+placed and saved, the editor marks it as not yet collectable, and a request using
+it is refused at send time with that reason. Collecting an uploaded file into a
+request is its own piece of work — retention, scanning, access to the stored file
+— and faking it (recording a file name, say) would put a claim in the evidence
+that the bytes do not support.
 
 ### W3 — Storage onto Onyx (P2, the one hard blocker)
 

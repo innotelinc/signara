@@ -485,6 +485,12 @@ model TemplateField {
   key         String?
   isRequired  Boolean   @default(true)
   pageNumber  Int       @default(1)
+  // Which signer fills this field, by their order index in the request
+  // (0 = first signer). OpenSign assigned every placed widget to a signer; a
+  // placement with no owner is unresolvable at signing time, so the binding is
+  // part of the placement rather than inferred. Defaults to the first signer,
+  // which is the only sensible reading of a single-signer template.
+  assigneeOrder Int     @default(0)
   x           Int?
   y           Int?
   width       Int?
@@ -496,6 +502,41 @@ model TemplateField {
 
   @@index([templateId])
   @@index([key])
+}
+
+/// A placement copied from a template onto a concrete signing request, bound to
+/// the signer who must fill it, and carrying the value they supplied.
+///
+/// It is a *copy*, not a reference: a template can be edited (and its fields are
+/// replaced wholesale on update) after a request has gone out, and a live
+/// request's placements and evidence must not be rewritten by that. The signer
+/// binding is materialised here for the same reason — order indices are only
+/// resolvable while the request's signers exist.
+model RequestField {
+  id         String    @id @default(uuid())
+  requestId  String
+  signerId   String?
+  type       FieldType
+  name       String?
+  key        String?
+  isRequired Boolean   @default(true)
+  pageNumber Int       @default(1)
+  x          Int?
+  y          Int?
+  width      Int?
+  height     Int?
+  options    Json?
+  // The value the signer supplied. JSON so a checkbox is a boolean and a
+  // dropdown keeps its option rather than everything flattening to a string.
+  value      Json?
+  filledAt   DateTime?
+  createdAt  DateTime  @default(now())
+
+  request SigningRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  signer  Signer?        @relation(fields: [signerId], references: [id], onDelete: SetNull)
+
+  @@index([requestId])
+  @@index([signerId])
 }
 
 // ------------------------------------------------------------ signatures ---
@@ -520,6 +561,7 @@ model SigningRequest {
   signers       Signer[]
   events        SignatureEvent[]
   signatures    Signature[]
+  fields        RequestField[]
   workflowRules WorkflowRule[]
 
   @@index([organizationId, status])
@@ -548,6 +590,7 @@ model Signer {
   user       User?           @relation("SignerUser", fields: [userId], references: [id])
   signatures Signature[]
   events     SignatureEvent[]
+  fields     RequestField[]
 
   @@unique([requestId, email])
   @@index([status])
