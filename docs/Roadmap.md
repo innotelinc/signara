@@ -277,6 +277,8 @@ what is owed to users in place of the history.
       Cerulean/Technitium (`_acme-challenge` records) — that is what issued them,
       and it is still the path renewal takes (`CERULEAN_RENEW_DAYS=30`).
 - [ ] **Mail: there is no path at all — this is not a deliverability check.**
+      **Decided 2026-09-21: the estate will run its own mail server rather than
+      choose a relay**, so this is waiting on that rather than undecided.
       `SMTP_HOST` is empty in the live `.env`, so `EmailService.isConfigured()` is
       false, every invite, reminder and completion mail is skipped, and the worker
       records the notification `SENT` rather than `DELIVERED` — so nothing
@@ -284,8 +286,9 @@ what is owed to users in place of the history.
       configured anywhere in the estate, outbound port 25 is blocked, and no SMTP
       credentials exist. The signing domain's mail is therefore **unauthenticated
       _and_ undelivered**, and completion email is the product's most visible
-      surface. Remaining: choose a relay, set `SMTP_*` and `ALERT_EMAIL_TO`, then
-      publish SPF/DKIM/DMARC for `signara.innotel.us`.
+      surface. Remaining: stand up the in-house server, point `SMTP_*` and
+      `ALERT_EMAIL_TO` at it, then publish SPF/DKIM/DMARC for
+      `signara.innotel.us`.
 - [x] Re-point anything still describing "sign-platform" in docs/comments — **done
       2026-09-19**: an estate-wide audit found no live references outside the
       retirement record itself, and the `sign` repo's forward-looking claims (README,
@@ -315,7 +318,10 @@ so `provision.py` cannot express them; they are managed by Cerulean directly.
       (`/srv/signara-backup-store`), so a dev teardown cannot take it with it.
       What remains is _off-site_, not off-host — a LAN peer is not a copy that
       survives the site — and `.10` is a development box rather than a provisioned
-      backup target. This item is met; that is the next durability step. The
+      backup target. **There is no off-site target to point at yet (2026-09-21)**:
+      the estate has none, so this is waiting on hardware rather than unexamined,
+      and `BACKUP_S3_*` is a config change the moment one exists. This item is met;
+      that is the next durability step. The
       mirror's **retention had been pruning nothing** since 2026-09-20 02:15 while
       every run reported success; the cause was in `onyx-objectstore`, not the
       backup script, and it is fixed there (W3's fourth gap), with both stores
@@ -395,11 +401,12 @@ losing this host; it is still an estimate for anything that takes the whole LAN.
    (`services/objectstore/sigv4.go`, `storage.contract.spec.ts` 6/6, and
    `sigv4_vectors_test.go` replaying AWS's published vector suite against it).
 5. ~~**Run one restore drill**~~ — **done 2026-09-20**, including a production
-   dump read back out of the mirror (`docs/DisasterRecovery.md` §4). **Still open:
-   make the mirror a different host.** `BACKUP_S3_*` now points at ONYX and the job
-   mirrors successfully, but ONYX runs on the deployment host, so
-   `signara_backup_mirror_offhost` is 0 and `BackupIsLocalOnly` is telling the
-   truth rather than crying wolf.
+   dump read back out of the mirror (`docs/DisasterRecovery.md` §4). ~~Make the
+   mirror a different host~~ — **done 2026-09-20**: `BACKUP_S3_*` points at a
+   dedicated store on `192.168.1.10` and `signara_backup_mirror_offhost` reads 1
+   (see W6). **Still open: an _off-site_ target**, and there is none in the estate
+   yet — so this waits on hardware rather than on an unexamined gap. Until one
+   exists the mirror is a LAN peer and losing the site still outlives the RTO.
 6. ~~**Cut storage over to Onyx**~~ — **done 2026-09-15**: 12 objects migrated
    and verified against `checksumSha256`, `SIGNARA_S3_*` points at the store,
    MinIO demoted to `legacy-storage` and stopped. See W3.
@@ -460,12 +467,13 @@ that is a different host, and a restore drill that has actually been run.
 
 ## 7. Risks
 
-- **A second silent data loss.** Halved, not closed: the restore path is now
-  rehearsed (`scripts/restore-drill.sh`, §W6) and local-only backups are an alert
-  rather than a log line, so the failure would at least be visible. What remains is
-  the part that actually decides survival — **a mirror on another host**, and one
-  drill against a production dump. Until a target is configured, losing this host
-  still loses the data.
+- **A second silent data loss.** Halved again, not closed. The restore path is
+  rehearsed (`scripts/restore-drill.sh`, §W6), local-only backups are an alert
+  rather than a log line, and the mirror is now **on another host** with a drill
+  against a production dump read back out of it — so losing this host no longer
+  loses the data. What remains is the part the relocation does not reach: the
+  mirror is a **LAN peer**, and the estate has no off-site target to point it at
+  (W6). Until there is one, losing the _site_ still outlives the RTO.
 - ~~**Onyx's SigV4 milestone slips.**~~ Cleared: SigV4 landed and the contract
   test passes against it. The residual risk is the **data copy** — moving
   existing objects into Onyx and proving the count, which is a migration chore
