@@ -190,6 +190,9 @@ describe('SignaturesService', () => {
       SignatureEventType.REJECTED,
       SignatureEventType.DOWNLOADED,
       SignatureEventType.EMAIL_FAILED,
+      // A handover is deliberately not a delivery: nothing was sent to a
+      // subscriber's signer, so `request.sent` would be a lie.
+      SignatureEventType.HANDED_OVER,
     ])('emits nothing for the internal event %s', async (type) => {
       await record(type as SignatureEventType);
       expect(webhooksMock.emit).not.toHaveBeenCalled();
@@ -322,6 +325,228 @@ describe('SignaturesService', () => {
         expect.objectContaining({ signerId: 's-1', kind: 'reminder' }),
         expect.anything(),
       );
+    });
+  });
+
+  describe('in-person signing (issue #88)', () => {
+    const signerRow = (over: Record<string, unknown> = {}) => ({
+      id: 's-1',
+      requestId: 'req-1',
+      email: 'signer@x.io',
+      role: SignerRole.SIGNER,
+      orderIndex: 0,
+      status: SignerStatus.INVITED,
+      token: 'sgn_token_one',
+      authMethod: null,
+      userId: null,
+      ...over,
+    });
+
+    const requestRow = (over: Record<string, unknown> = {}) => ({
+      id: 'req-1',
+      organizationId: 'org-1',
+      status: DocumentStatus.AWAITING_SIGNATURE,
+      mode: SigningMode.SEQUENTIAL,
+      deadline: null,
+      signers: [signerRow(), signerRow({ id: 's-2', orderIndex: 1, status: SignerStatus.PENDING })],
+      ...over,
+    });
+
+    beforeEach(() => {
+      configValues['app.webUrl'] = 'https://app.example.test/';
+    });
+
+    it('hands the waiting signer a link and queues no mail', async () => {
+      prismaMock.signingRequest.findFirst.mockResolvedValue(requestRow());
+      prismaMock.signer.findMany.mockResolvedValue([]);
+
+      const result = await service.inPersonSession(user, 'req-1');
+
+      // The URL is the same one the invitation mailer would have sent, built the
+      // same way — a handover must not produce a link the signing room treats
+      // differently.
+      expect(result).toEqual({
+        requestId: 'req-1',
+        signerId: 's-1',
+        signerEmail: 'signer@x.io',
+        url: 'https://app.example.test/sign/sgn_token_one',
+      });
+      // Marked on the signer, because that is what reaches the signature.
+      expect(prismaMock.signer.update).toHaveBeenCalledWith({
+        where: { id: 's-1' },
+        data: { authMethod: 'in_person' },
+      });
+      // Its own event, not an INVITED: the trail has to tell a handover from an
+      // emailed invitation.
+      expect(prismaMock.signatureEvent.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          type: SignatureEventType.HANDED_OVER,
+          signerId: 's-1',
+          metadata: expect.objectContaining({ handedOverBy: user.email, inPerson: true }),
+        }),
+      });
+      // The whole point: no email round trip.
+      expect(queueMock.add).not.toHaveBeenCalled();
+    });
+
+    it('refuses a signer the sequential flow has not reached', async () => {
+      prismaMock.signingRequest.findFirst.mockResolvedValue(requestRow());
+      prismaMock.signer.findMany.mockResolvedValue([{ status: SignerStatus.INVITED }]);
+
+      await expect(service.inPersonSession(user, 'req-1', 's-2')).rejects.toThrow(
+        "It is not that signer's turn yet",
+      );
+      expect(prismaMock.signer.update).not.toHaveBeenCalled();
+    });
+
+    it('refuses to guess which signer is present on a parallel request', async () => {
+      prismaMock.signingRequest.findFirst.mockResolvedValue(
+        requestRow({
+          mode: SigningMode.PARALLEL,
+          signers: [
+            signerRow(),
+            signerRow({ id: 's-2', orderIndex: 1, status: SignerStatus.INVITED }),
+          ],
+        }),
+      );
+
+      await expect(service.inPersonSession(user, 'req-1')).rejects.toThrow('signerId is required');
+      // Nothing was marked and nothing was recorded: a refused handover must not
+      // leave a trace that says one happened.
+      expect(prismaMock.signer.update).not.toHaveBeenCalled();
+      expect(prismaMock.signatureEvent.create).not.toHaveBeenCalled();
+    });
+
+    it('hands over a named signer when a parallel request releases several', async () => {
+      prismaMock.signingRequest.findFirst.mockResolvedValue(
+        requestRow({
+          mode: SigningMode.PARALLEL,
+          signers: [
+            signerRow(),
+            signerRow({
+              id: 's-2',
+              orderIndex: 1,
+              email: 'second@x.io',
+              status: SignerStatus.INVITED,
+              token: 'sgn_token_two',
+            }),
+          ],
+        }),
+      );
+      prismaMock.signer.findMany.mockResolvedValue([]);
+
+      const result = await service.inPersonSession(user, 'req-1', 's-2');
+
+      expect(result).toEqual({
+        requestId: 'req-1',
+        signerId: 's-2',
+        signerEmail: 'second@x.io',
+        url: 'https://app.example.test/sign/sgn_token_two',
+      });
+    });
+
+    it('never hands a carbon-copy recipient a signing session', async () => {
+      prismaMock.signingRequest.findFirst.mockResolvedValue(
+        requestRow({
+          signers: [signerRow({ id: 'cc-1', role: SignerRole.CC, status: SignerStatus.INVITED })],
+        }),
+      );
+
+      await expect(service.inPersonSession(user, 'req-1', 'cc-1')).rejects.toThrow(
+        'not on this request',
+      );
+    });
+
+    it('refuses a signer who has already signed', async () => {
+      prismaMock.signingRequest.findFirst.mockResolvedValue(
+        requestRow({ signers: [signerRow({ status: SignerStatus.SIGNED })] }),
+      );
+
+      await expect(service.inPersonSession(user, 'req-1', 's-1')).rejects.toThrow('already signed');
+    });
+
+    it('refuses a request that is no longer active', async () => {
+      prismaMock.signingRequest.findFirst.mockResolvedValue(
+        requestRow({ status: DocumentStatus.COMPLETED }),
+      );
+
+      await expect(service.inPersonSession(user, 'req-1')).rejects.toThrow('no longer active');
+    });
+
+    it('expires a request whose deadline has passed instead of handing it over', async () => {
+      prismaMock.signingRequest.findFirst.mockResolvedValue(
+        requestRow({ deadline: new Date(Date.now() - 60_000) }),
+      );
+
+      await expect(service.inPersonSession(user, 'req-1')).rejects.toThrow('expired');
+      expect(prismaMock.signingRequest.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { status: DocumentStatus.EXPIRED } }),
+      );
+    });
+
+    it('refuses when no signer is waiting at all', async () => {
+      prismaMock.signingRequest.findFirst.mockResolvedValue(
+        requestRow({
+          signers: [signerRow({ status: SignerStatus.SIGNED })],
+        }),
+      );
+
+      await expect(service.inPersonSession(user, 'req-1')).rejects.toThrow('No signer is waiting');
+    });
+
+    it('carries the handover into the signature it produces', async () => {
+      // The signature records the operator's IP and user agent — that is what a
+      // handover means — so the trail has to say *why* those are not the
+      // signer's, which is the inPerson marker on the SIGNED event.
+      prismaMock.signer.findUnique.mockResolvedValue({
+        id: 's-1',
+        requestId: 'req-1',
+        email: 'signer@x.io',
+        role: SignerRole.SIGNER,
+        status: SignerStatus.VIEWED,
+        orderIndex: 0,
+        authMethod: 'in_person',
+        userId: null,
+        request: {
+          status: DocumentStatus.AWAITING_SIGNATURE,
+          documentId: 'doc-1',
+          mode: SigningMode.PARALLEL,
+          organizationId: 'org-1',
+          deadline: null,
+        },
+      });
+      prismaMock.document.findUniqueOrThrow.mockResolvedValue({
+        id: 'doc-1',
+        fileKey: 'org-1/documents/doc-1.pdf',
+      });
+      prismaMock.signature.create.mockResolvedValue({
+        id: 'sig-1',
+        type: 'TYPED',
+        certificateSerial: null,
+        certificateId: null,
+      });
+      prismaMock.signingRequest.findUnique.mockResolvedValue({
+        id: 'req-1',
+        documentId: 'doc-1',
+        signers: [],
+      });
+
+      await service.sign(
+        'sgn_token_one',
+        { type: 'TYPED' },
+        {
+          ipAddress: '10.0.0.9',
+          userAgent: 'reception-tablet',
+        },
+      );
+
+      expect(prismaMock.signatureEvent.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          type: SignatureEventType.SIGNED,
+          ipAddress: '10.0.0.9',
+          metadata: expect.objectContaining({ inPerson: true }),
+        }),
+      });
     });
   });
 });

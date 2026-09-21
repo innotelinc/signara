@@ -1,0 +1,13 @@
+-- AlterEnum
+--
+-- In-person signing: an operator obtained a signer's signing session and handed
+-- the device over, so the signer present could sign with no email round trip.
+-- Appended rather than slotted in beside INVITED so no existing value moves;
+-- PostgreSQL orders an enum's values and Prisma compares that order.
+--
+-- A new value instead of reusing INVITED, which no code path records today: the
+-- audit trail has to be able to tell "an operator took this link" from "an
+-- invitation was emailed", and it also has to tell it from the outside — an
+-- emailed invitation is a request.sent webhook, and a handover deliberately is
+-- not a delivery to any subscriber.
+ALTER TYPE "SignatureEventType" ADD VALUE 'HANDED_OVER';

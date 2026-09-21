@@ -3,7 +3,18 @@ import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Request } from 'express';
 import { SigningMode, SignerRole, SignatureType } from '@prisma/client';
 import { Type } from 'class-transformer';
-import { IsArray, IsBoolean, IsDate, IsEnum, IsInt, IsObject, IsOptional, IsString, Min, ValidateNested } from 'class-validator';
+import {
+  IsArray,
+  IsBoolean,
+  IsDate,
+  IsEnum,
+  IsInt,
+  IsObject,
+  IsOptional,
+  IsString,
+  Min,
+  ValidateNested,
+} from 'class-validator';
 import { SignaturesService } from './signatures.service';
 import { CurrentUser, Permissions, Public, TenantRequired } from '../../common/decorators';
 import { AuthenticatedUser } from '../../common/types';
@@ -18,7 +29,8 @@ class SignerDto {
 class WorkflowRuleDto {
   @Type(() => Number) @IsInt() @Min(0) orderIndex!: number;
   @IsObject() condition!: Record<string, unknown>;
-  @IsEnum(['APPROVE', 'ROUTE', 'REQUIRE', 'NOTIFY']) action!: 'APPROVE' | 'ROUTE' | 'REQUIRE' | 'NOTIFY';
+  @IsEnum(['APPROVE', 'ROUTE', 'REQUIRE', 'NOTIFY']) action!:
+    'APPROVE' | 'ROUTE' | 'REQUIRE' | 'NOTIFY';
   @IsOptional() @IsString() targetSignerId?: string;
 }
 
@@ -30,7 +42,11 @@ class CreateRequestDto {
   @IsOptional() @IsEnum(SigningMode) mode?: SigningMode;
   @IsOptional() @IsBoolean() sendInvites?: boolean;
   @IsArray() @ValidateNested({ each: true }) @Type(() => SignerDto) signers!: SignerDto[];
-  @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => WorkflowRuleDto) workflowRules?: WorkflowRuleDto[];
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => WorkflowRuleDto)
+  workflowRules?: WorkflowRuleDto[];
 }
 
 class SignDto {
@@ -88,7 +104,11 @@ export class SignaturesController {
   @TenantRequired()
   @Permissions('signing.cancel')
   @ApiOperation({ summary: 'Cancel a signing request' })
-  cancel(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body('reason') reason?: string) {
+  cancel(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body('reason') reason?: string,
+  ) {
     return this.signatures.cancel(user, id, reason);
   }
 
@@ -96,7 +116,11 @@ export class SignaturesController {
   @TenantRequired()
   @Permissions('signing.remind')
   @ApiOperation({ summary: 'Send reminders to pending signers (max once per 24h)' })
-  remind(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body('signerId') signerId?: string) {
+  remind(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body('signerId') signerId?: string,
+  ) {
     return this.signatures.remind(user, id, signerId);
   }
 
@@ -106,6 +130,21 @@ export class SignaturesController {
   @ApiOperation({ summary: 'Generate the signature evidence report' })
   evidence(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     return this.signatures.evidenceReport(user, id);
+  }
+
+  @Post('requests/:id/in-person-session')
+  @TenantRequired()
+  @Permissions('signing.send')
+  @ApiOperation({
+    summary:
+      'Hand the signing session to a signer who is present, for signing on this device (no email)',
+  })
+  inPersonSession(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body('signerId') signerId?: string,
+  ) {
+    return this.signatures.inPersonSession(user, id, signerId);
   }
 
   // -------------------------------------------------- public token links ----
@@ -126,7 +165,11 @@ export class SignaturesController {
   @Public()
   @Post('public/:token/decline')
   @ApiOperation({ summary: 'Decline to sign' })
-  decline(@Param('token') token: string, @Body('reason') reason: string | undefined, @Req() req: Request) {
+  decline(
+    @Param('token') token: string,
+    @Body('reason') reason: string | undefined,
+    @Req() req: Request,
+  ) {
     return this.signatures.decline(token, reason, this.ctx(req));
   }
 
@@ -138,6 +181,9 @@ export class SignaturesController {
   }
 
   private ctx(req: Request) {
-    return { ipAddress: String(req.ip ?? 'unknown'), userAgent: String(req.headers['user-agent'] ?? '') };
+    return {
+      ipAddress: String(req.ip ?? 'unknown'),
+      userAgent: String(req.headers['user-agent'] ?? ''),
+    };
   }
 }

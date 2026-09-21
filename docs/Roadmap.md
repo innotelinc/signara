@@ -121,7 +121,7 @@ completion mail subjects and bodies #83 has to keep, and the certificate layout
 | API for integrators                            | `api-keys` module, `openapi/`; outbound webhooks (`webhooks` module, `docs/Webhooks.md`) — **landed 2026-09-20** (#85), verified live on the deployment (a real `request.viewed` delivered and the signature recomputed `OK` by an independent receiver; a failing subscriber retried on 2s→4s→8s backoff) | webhook deliveries are queued and retried, but nothing consumes `WebhookDelivery` to auto-disable an endpoint that has failed for weeks       |
 | Bulk send                                      | —                                                                                                                                                                                                                                                                                                          | **no bulk endpoint**; OpenSign had one. Deliberate or not, decide                                                                             |
 | Branding per tenant                            | `Setting` model, `organizations` module                                                                                                                                                                                                                                                                    | per-org logo/sender templates                                                                                                                 |
-| In-person signing                              | —                                                                                                                                                                                                                                                                                                          | decide: needed for the self-hosted use case, or explicitly out of scope                                                                       |
+| In-person signing                              | `POST /signatures/requests/:id/in-person-session` returns a waiting signer's link for an operator to open on the device being handed over; web "Sign in person" on the request row, and a delivery choice in the send wizard — **landed 2026-09-21** (#88)                                                 | —                                                                                                                                             |
 | Cloud-storage imports (Drive/Dropbox/OneDrive) | —                                                                                                                                                                                                                                                                                                          | decide; Onyx is the destination, so these are _sources_ only                                                                                  |
 | SMS / WhatsApp delivery                        | —                                                                                                                                                                                                                                                                                                          | decide; email-only is defensible, but say so                                                                                                  |
 | i18n                                           | `public/locales/` with 7 catalogs (de, en, es, fr, hi, it, kr) harvested from the retired fork, wired through `web/src/lib/i18n/`                                                                                                                                                                          | the harvested catalogs describe OpenSign's screens, not Signara's newer ones — extract the remaining strings into keys as screens are touched |
@@ -129,15 +129,31 @@ completion mail subjects and bodies #83 has to keep, and the certificate layout
 | Admin/ops view                                 | `admin`: orgs, users, status, `metrics`                                                                                                                                                                                                                                                                    | —                                                                                                                                             |
 
 **Exit:** every row is either **shipped**, **decided out of scope with a reason**,
-or **scheduled** — nothing is "unknown". Status: 8 rows shipped (upload,
+or **scheduled** — nothing is "unknown". Status: 9 rows shipped (upload,
 versions, download; send for signature; guest signing; audit trail; admin/ops;
-reminders — #82, 2026-09-20; outbound webhooks — #85, 2026-09-20), **10 still
-filed as issues #81, #83–#92** — 6 gaps and 4 decisions (bulk send, in-person
-signing, cloud-storage import, SMS/WhatsApp), plus the billing question in §8.
+reminders — #82, 2026-09-20; outbound webhooks — #85, 2026-09-20; in-person
+signing — #88, 2026-09-21), **9 still filed as issues #81, #83–#87, #89–#92** —
+6 gaps and 3 decisions (bulk send, cloud-storage import, SMS/WhatsApp), plus the
+billing question in §8.
 Two tracker premises were stale and are corrected on the issues: #91 (the
 locales exist — 7 catalogs shipped 2026-09-20) and #82 (the manual reminder was
 also sending the _invite_ template, because the enqueued job never said it was a
 reminder).
+
+**What in-person signing covers, and what it deliberately does not (#88).** An
+operator with `signing.send` obtains a signer's signing link and opens it on the
+device being handed over, so nothing is emailed — `sendInvites: false` used to be
+a dead end, because there was no way to hand anyone the link. The room the signer
+sees is the ordinary guest session, unchanged. Three choices are deliberate: the
+handover is its own `HANDED_OVER` audit event and **not** an `INVITED` one, so the
+trail cannot read a handover as an emailed invitation; the signer is marked
+`in_person` and the signature carries it, so the evidence shows that the IP and
+user agent on that signature are the _operator's_ device; and a signer whose turn
+has not come is refused here rather than handed a link that opens onto "not your
+turn". One limit worth stating: a signer's address is still required, because it
+is the identity record the content hash binds and the mailbox a completion notice
+would use — so "no email round trip" means no invitation is _delivered_, not that
+Signara learns nothing about who signed.
 
 ### W3 — Storage onto Onyx (P2, the one hard blocker)
 
@@ -467,8 +483,9 @@ that is a different host, and a restore drill that has actually been run.
 
 1. ~~**Legacy data:** timebox the recovery, or write it off now?~~ — **settled
    2026-09-15: written off** (§6), after the recovery pass found nothing.
-2. **Parity rows marked "decide"** — bulk send, in-person signing, cloud-storage
-   imports, SMS/WhatsApp, i18n: ship or explicitly out of scope?
+2. **Parity rows marked "decide"** — bulk send, cloud-storage imports,
+   SMS/WhatsApp, i18n: ship or explicitly out of scope? (In-person signing was
+   answered on 2026-09-21 — shipped; see W2.)
 3. **Billing:** Signara's module as a Magnate client, or removed?
 
 ---

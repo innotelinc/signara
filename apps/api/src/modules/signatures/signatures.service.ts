@@ -476,6 +476,9 @@ export class SignaturesService {
       certificateSerial: signature.certificateSerial,
       certificateId: signature.certificateId,
       identityAssurance: certificateEvidence?.identityAssurance,
+      // Carried from the handover so the trail says how this signature was
+      // collected, not only that it was. See inPersonSession.
+      ...(signer.authMethod === 'in_person' ? { inPerson: true } : {}),
     });
 
     await this.advanceWorkflow(signer.requestId, signer.request.mode);
@@ -778,6 +781,116 @@ export class SignaturesService {
       })),
       statement: this.buildComplianceStatement(request.events),
     };
+  }
+
+  // ------------------------------------------------------- in person ------
+  /**
+   * Hands a signing session to a signer who is present, so they sign on this
+   * device with no email round trip (in-person signing, #88).
+   *
+   * The session this opens is the ordinary guest session — the token is the
+   * credential whether it arrives by email or by hand — so nothing about what
+   * the signer sees is new. What is new is that an operator can *get* that
+   * session: until now the only way a signing link left the system was an
+   * invitation email, which made `sendInvites: false` a draft that could never
+   * be signed rather than a request that could be handed over.
+   *
+   * Handing over a signing credential is a deliberate act, so it is gated on
+   * `signing.send`, scoped to the caller's tenant, and written to the trail as
+   * its own event (`HANDED_OVER`): "an operator took this link" is not
+   * "an invitation was emailed", and a reader of the evidence must be able to
+   * tell them apart. The signer is marked `in_person`, which `sign()` carries
+   * into the signature, because the IP and user agent recorded for an in-person
+   * signature belong to the operator's device — that is exactly the difference
+   * the evidence has to show rather than hide.
+   *
+   * A signer who may not act yet is refused here instead of at the device: a
+   * link that opens onto "not your turn" is a worse failure than a refusal that
+   * says why, and the operator is standing beside the signer either way.
+   */
+  async inPersonSession(user: AuthenticatedUser, id: string, signerId?: string) {
+    const orgId = user.org?.id;
+    if (!orgId) throw new ForbiddenException('No active tenant');
+
+    const request = await this.prisma.signingRequest.findFirst({
+      where: { id, organizationId: orgId },
+      include: { signers: { orderBy: { orderIndex: 'asc' } } },
+    });
+    if (!request) throw new NotFoundException('Signing request not found');
+    if (!['AWAITING_SIGNATURE', 'IN_PROGRESS'].includes(request.status)) {
+      throw new ConflictException('This signing request is no longer active');
+    }
+    if (request.deadline && request.deadline < new Date()) {
+      await this.markRequestExpired(request.id);
+      throw new ConflictException('This signing request has expired');
+    }
+
+    const candidates = request.signers.filter((signer) => signer.role !== SignerRole.CC);
+    const waiting = candidates.filter(
+      (signer) => signer.status === SignerStatus.INVITED || signer.status === SignerStatus.VIEWED,
+    );
+    let signer: (typeof candidates)[number] | undefined;
+    if (signerId) {
+      signer = candidates.find((candidate) => candidate.id === signerId);
+      if (!signer) throw new NotFoundException('That signer is not on this request');
+    } else if (waiting.length === 1) {
+      signer = waiting[0];
+    } else if (waiting.length === 0) {
+      throw new NotFoundException('No signer is waiting to sign on this request');
+    } else {
+      // A parallel request releases everyone at once, so "the signer present" is
+      // ambiguous and guessing could put the device in the wrong hands.
+      throw new BadRequestException(
+        'signerId is required: more than one signer may sign on this request at once',
+      );
+    }
+
+    if (signer.status === SignerStatus.SIGNED)
+      throw new ConflictException('That signer has already signed');
+    if (signer.status === SignerStatus.DECLINED)
+      throw new ConflictException('That signer declined this request');
+    if (
+      !this.canSignNow(request.mode, signer) ||
+      !(await this.canSignerAct({
+        id: signer.id,
+        requestId: signer.requestId,
+        role: signer.role,
+        orderIndex: signer.orderIndex,
+        status: signer.status,
+        request: { mode: request.mode, status: request.status },
+      }))
+    ) {
+      throw new ConflictException("It is not that signer's turn yet");
+    }
+
+    await this.prisma.signer.update({
+      where: { id: signer.id },
+      data: { authMethod: 'in_person' },
+    });
+    await this.recordEvent(request.id, SignatureEventType.HANDED_OVER, signer.id, {
+      handedOverBy: user.email,
+      inPerson: true,
+    });
+
+    return {
+      requestId: request.id,
+      signerId: signer.id,
+      signerEmail: signer.email,
+      url: `${this.webUrl().replace(/\/$/, '')}/sign/${signer.token}`,
+    };
+  }
+
+  /**
+   * The web app's origin — the same value the invitation mailer builds its
+   * signing links from, so a link handed over and a link emailed are the same
+   * URL and a change to one cannot silently diverge from the other.
+   */
+  private webUrl(): string {
+    return (
+      this.config.get<string>('app.webUrl') ??
+      process.env.WEB_URL ??
+      'https://app.signara.innotel.us'
+    );
   }
 
   /** Creates (or resets) the always-on demo signing session behind /sign/demo. */

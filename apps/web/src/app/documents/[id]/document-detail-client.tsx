@@ -9,6 +9,7 @@ import {
   Download,
   FileText,
   FileUp,
+  Handshake,
   PenLine,
   Send,
   ShieldCheck,
@@ -16,7 +17,14 @@ import {
 } from 'lucide-react';
 import { api, ApiError } from '@/lib/api';
 import { env } from '@/lib/env';
-import { Badge, Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Badge,
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
 import { Button, Spinner } from '@/components/ui/button';
 import type { DocumentDetail } from '@/lib/types';
 
@@ -71,6 +79,27 @@ export function DocumentDetailClient({ documentId }: { documentId: string }) {
   useEffect(() => {
     void load();
   }, [load]);
+
+  /**
+   * Hands this device to the signer who is present: the API returns the same
+   * signing link the guest room would have been emailed, and this tab becomes
+   * that room. No email goes out, and the handover is written to the audit trail
+   * as its own event — see docs/Roadmap.md W2 (in-person signing).
+   */
+  async function signInPerson(requestId: string) {
+    setBusy(`in-person-${requestId}`);
+    setError(null);
+    try {
+      const { url } = await api.post<{ url: string }>(
+        `/api/v1/signatures/requests/${requestId}/in-person-session`,
+        {},
+      );
+      window.location.assign(url);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not start an in-person session');
+      setBusy(null);
+    }
+  }
 
   async function download(id: string, version?: number) {
     if (!doc) return;
@@ -163,13 +192,21 @@ export function DocumentDetailClient({ documentId }: { documentId: string }) {
     <div>
       <div className="mb-6 flex items-start justify-between gap-4">
         <div>
-          <Link href="/documents" className="mb-2 inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-700">
+          <Link
+            href="/documents"
+            className="mb-2 inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-700"
+          >
             <ArrowLeft className="h-4 w-4" />
             Documents
           </Link>
           {editing ? (
             <div className="max-w-md">
-              <input className="input mb-2" value={title} onChange={(e) => setTitle(e.target.value)} aria-label="Title" />
+              <input
+                className="input mb-2"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                aria-label="Title"
+              />
               <textarea
                 className="input"
                 rows={2}
@@ -185,7 +222,9 @@ export function DocumentDetailClient({ documentId }: { documentId: string }) {
             </>
           )}
           <div className="mt-2 flex flex-wrap items-center gap-2">
-            <Badge tone={STATUS_TONE[doc.status] ?? 'gray'}>{doc.status.replaceAll('_', ' ')}</Badge>
+            <Badge tone={STATUS_TONE[doc.status] ?? 'gray'}>
+              {doc.status.replaceAll('_', ' ')}
+            </Badge>
             <Badge tone="blue">{doc.contentType ?? 'unknown type'}</Badge>
             {doc.tags.map((tag) => (
               <Badge key={tag} tone="teal">
@@ -207,7 +246,11 @@ export function DocumentDetailClient({ documentId }: { documentId: string }) {
             </>
           ) : (
             <>
-              <Button variant="outline" onClick={() => void download(doc.id)} loading={busy === 'dl-current'}>
+              <Button
+                variant="outline"
+                onClick={() => void download(doc.id)}
+                loading={busy === 'dl-current'}
+              >
                 <Download className="h-4 w-4" />
                 Download
               </Button>
@@ -222,7 +265,11 @@ export function DocumentDetailClient({ documentId }: { documentId: string }) {
                 className="hidden"
                 onChange={(e) => onNewVersion(e.target.files?.[0])}
               />
-              <Button variant="outline" onClick={() => versionInput.current?.click()} loading={busy === 'version'}>
+              <Button
+                variant="outline"
+                onClick={() => versionInput.current?.click()}
+                loading={busy === 'version'}
+              >
                 <FileUp className="h-4 w-4" />
                 New version
               </Button>
@@ -236,7 +283,9 @@ export function DocumentDetailClient({ documentId }: { documentId: string }) {
       </div>
 
       {error && (
-        <div className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
+        <div className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {error}
+        </div>
       )}
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
@@ -293,11 +342,27 @@ export function DocumentDetailClient({ documentId }: { documentId: string }) {
                         <div>
                           <p className="text-sm font-medium">{req.title ?? doc.title}</p>
                           <p className="text-xs text-slate-500">
-                            {req.mode.toLowerCase()} · {new Date(req.createdAt).toLocaleDateString()}
+                            {req.mode.toLowerCase()} ·{' '}
+                            {new Date(req.createdAt).toLocaleDateString()}
                           </p>
                         </div>
                       </div>
-                      <Badge tone={STATUS_TONE[req.status] ?? 'gray'}>{req.status.replaceAll('_', ' ')}</Badge>
+                      <div className="flex items-center gap-2">
+                        {(req.status === 'AWAITING_SIGNATURE' || req.status === 'IN_PROGRESS') && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => void signInPerson(req.id)}
+                            loading={busy === `in-person-${req.id}`}
+                          >
+                            <Handshake className="h-4 w-4" />
+                            Sign in person
+                          </Button>
+                        )}
+                        <Badge tone={STATUS_TONE[req.status] ?? 'gray'}>
+                          {req.status.replaceAll('_', ' ')}
+                        </Badge>
+                      </div>
                     </li>
                   ))}
                 </ul>
