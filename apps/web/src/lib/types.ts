@@ -45,6 +45,8 @@ export interface DocumentDetail {
   version: number;
   updatedAt: string;
   createdAt: string;
+  /** The template whose placed fields this document carries, if any. */
+  templateId: string | null;
   versions: DocumentVersion[];
   signingRequests: SigningRequestLite[];
 }
@@ -61,10 +63,33 @@ export type FieldType =
   | 'EMAIL'
   | 'COMPANY'
   | 'JOB_TITLE'
-  | 'PHONE';
+  | 'PHONE'
+  | 'ADDRESS'
+  | 'CUSTOM';
 
 export interface TemplateField {
   id?: string;
+  type: FieldType;
+  name: string | null;
+  key: string | null;
+  isRequired: boolean;
+  pageNumber: number;
+  /** Which signer fills this field, by order index (0 = first signer). */
+  assigneeOrder: number;
+  x: number | null;
+  y: number | null;
+  width: number | null;
+  height: number | null;
+  options?: unknown;
+}
+
+/**
+ * A placed field on a live signing request, as the signer filling it sees it.
+ * Copied from the template at send time, so it is what the signer was actually
+ * asked, not what the template says today.
+ */
+export interface RequestField {
+  id: string;
   type: FieldType;
   name: string | null;
   key: string | null;
@@ -75,6 +100,8 @@ export interface TemplateField {
   width: number | null;
   height: number | null;
   options?: unknown;
+  value?: unknown;
+  filledAt?: string | null;
 }
 
 export interface TemplateDetail {

@@ -49,6 +49,17 @@ class CreateRequestDto {
   workflowRules?: WorkflowRuleDto[];
 }
 
+class FieldValueDto {
+  /** Id of a `requestedFields` entry this value answers. */
+  @IsString() id!: string;
+  /**
+   * The value the signer supplied. Deliberately JSON rather than a string: a
+   * checkbox is a boolean and a dropdown keeps its option, so the evidence says
+   * what was answered rather than a flattened rendering of it.
+   */
+  @IsOptional() value?: unknown;
+}
+
 class SignDto {
   @IsOptional() @IsEnum(SignatureType) type?: SignatureType;
   @IsOptional() @IsString() certificateSerial?: string;
@@ -59,6 +70,12 @@ class SignDto {
   @IsOptional() @IsString() certificateId?: string;
   /** Cryptographic signature value (base64) produced by the key holder. */
   @IsOptional() @IsString() signatureValue?: string;
+  /** Values for the placed fields this signer must fill. */
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => FieldValueDto)
+  fields?: FieldValueDto[];
 }
 
 @ApiTags('signatures')

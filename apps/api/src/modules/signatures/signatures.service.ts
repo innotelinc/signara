@@ -12,12 +12,14 @@ import { Queue } from 'bullmq';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import {
   DocumentStatus,
+  FieldType,
   Prisma,
   SignatureEventType,
   SigningMode,
   SignerRole,
   SignerStatus,
   SignatureType,
+  TemplateField,
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { MinioService } from '../../storage/minio.service';
@@ -25,6 +27,12 @@ import { CertificatesService, CertificateEvidence } from '../certificates/certif
 import { unsignedAssurance } from '../certificates/identity-assurance';
 import { WebhooksService, WebhookEvent } from '../webhooks/webhooks.service';
 import { AuthenticatedUser } from '../../common/types';
+
+/** A placed field's value, as submitted by the signer filling it. */
+export interface FieldValueInput {
+  id: string;
+  value?: unknown;
+}
 
 export interface CreateRequestInput {
   documentId: string;
@@ -146,6 +154,15 @@ export class SignaturesService {
     // Sequential mode: only the first (or next) signer may act at a time.
     const mode = input.mode ?? SigningMode.SEQUENTIAL;
 
+    // Resolve the document's template placements *before* the request exists, so
+    // a template that points a field at a signer the request does not have fails
+    // here with a reason, rather than sending an envelope that silently omits a
+    // field the sender believed was on it.
+    const placements = await this.loadTemplatePlacements(
+      document.templateId,
+      orderedSigners.length,
+    );
+
     const request = await this.prisma.signingRequest.create({
       data: {
         organizationId: orgId,
@@ -187,7 +204,15 @@ export class SignaturesService {
       where: { id: document.id },
       data: { status: DocumentStatus.AWAITING_SIGNATURE },
     });
-    await this.recordEvent(request.id, SignatureEventType.CREATED, null, { createdBy: user.email });
+    if (placements.length) {
+      await this.prisma.requestField.createMany({
+        data: this.placementsForRequest(request.id, placements, request.signers),
+      });
+    }
+    await this.recordEvent(request.id, SignatureEventType.CREATED, null, {
+      createdBy: user.email,
+      ...(placements.length ? { fieldsPlaced: placements.length } : {}),
+    });
 
     const signingTrackers = request.signers.filter((s) => s.status === SignerStatus.INVITED);
     if (input.sendInvites !== false) {
@@ -348,7 +373,10 @@ export class SignaturesService {
       allowsSigning: canSignNow,
 
       authMethod: signer.role === SignerRole.SIGNER ? (signer.userId ? 'oidc' : 'email') : 'email',
-      requestedFields: await this.fieldsForDocument(signer.request.documentId),
+      // Only the fields *this* signer must fill. A placement belongs to one
+      // signer (TemplateField.assigneeOrder), and showing another signer's
+      // fields here would invite them to fill evidence that is not theirs.
+      requestedFields: await this.requestFieldsForSigner(signer.requestId, signer.id),
     };
   }
 
@@ -363,6 +391,8 @@ export class SignaturesService {
       signatureData?: string;
       certificateId?: string;
       signatureValue?: string;
+      /** Values for the placed fields this signer must fill. */
+      fields?: FieldValueInput[];
     },
     ctx: ClientContext,
   ) {
@@ -402,6 +432,10 @@ export class SignaturesService {
       throw new BadRequestException('signedHash does not match the current document contents');
     }
     const finalHash = input.signedHash ?? contentHash;
+
+    // Validate the placed fields before any signing work, so a signer who left a
+    // required field blank is told that rather than getting a certificate error.
+    const fieldValues = await this.resolveFieldValues(signer.requestId, signer.id, input.fields);
 
     // Certificate-backed signing: bind the certificate to the signer identity,
     // produce/verify the cryptographic signature, and snapshot the assurance.
@@ -461,6 +495,8 @@ export class SignaturesService {
       throw error;
     }
 
+    await this.captureFieldValues(fieldValues);
+
     await this.prisma.signer.update({
       where: { id: signer.id },
       data: {
@@ -473,6 +509,7 @@ export class SignaturesService {
       ...ctx,
       signatureId: signature.id,
       type: signature.type,
+      ...(fieldValues.length ? { fieldsCaptured: fieldValues.length } : {}),
       certificateSerial: signature.certificateSerial,
       certificateId: signature.certificateId,
       identityAssurance: certificateEvidence?.identityAssurance,
@@ -737,6 +774,7 @@ export class SignaturesService {
         signers: { include: { signatures: true } },
         events: { orderBy: { createdAt: 'asc' } },
         signatures: true,
+        fields: { orderBy: [{ pageNumber: 'asc' }, { createdAt: 'asc' }] },
       },
     });
     if (!request) throw new NotFoundException('Signing request not found');
@@ -756,6 +794,21 @@ export class SignaturesService {
           status: s.status,
           signedAt: s.signedAt,
           authMethod: s.authMethod,
+          // The placed fields this signer filled, with their values — the half of
+          // the evidence that a template-based envelope adds beyond the signature
+          // itself, and which used to be dropped on the floor entirely.
+          fields: request.fields
+            .filter((f) => f.signerId === s.id)
+            .map((f) => ({
+              id: f.id,
+              key: f.key,
+              name: f.name,
+              type: f.type,
+              pageNumber: f.pageNumber,
+              required: f.isRequired,
+              value: f.value,
+              filledAt: f.filledAt,
+            })),
           signatures: s.signatures.map((sig) => ({
             id: sig.id,
             type: sig.type,
@@ -939,7 +992,7 @@ export class SignaturesService {
       },
     });
 
-    await this.prisma.signer.create({
+    const signer = await this.prisma.signer.create({
       data: {
         requestId: request.id,
         email: DEMO_SIGNER_EMAIL,
@@ -950,6 +1003,74 @@ export class SignaturesService {
         token: DEMO_TOKEN,
         authMethod: 'email',
       },
+    });
+    // The demo gets its own placements, because the demo is the only way most
+    // visitors ever see the signing room: if placed fields are invisible here
+    // they are invisible to everyone deciding whether they exist.
+    await this.prisma.requestField.createMany({
+      data: [
+        {
+          requestId: request.id,
+          signerId: signer.id,
+          type: FieldType.NAME,
+          name: 'Full name',
+          key: 'full_name',
+          pageNumber: 1,
+          x: 10,
+          y: 62,
+          width: 34,
+          height: 6,
+        },
+        {
+          requestId: request.id,
+          signerId: signer.id,
+          type: FieldType.DATE,
+          name: 'Date',
+          key: 'date',
+          pageNumber: 1,
+          x: 50,
+          y: 62,
+          width: 22,
+          height: 6,
+        },
+        {
+          requestId: request.id,
+          signerId: signer.id,
+          type: FieldType.COMPANY,
+          name: 'Company',
+          key: 'company',
+          isRequired: false,
+          pageNumber: 1,
+          x: 10,
+          y: 70,
+          width: 34,
+          height: 6,
+        },
+        {
+          requestId: request.id,
+          signerId: signer.id,
+          type: FieldType.SIGNATURE,
+          name: 'Signature',
+          key: 'signature',
+          pageNumber: 1,
+          x: 10,
+          y: 80,
+          width: 34,
+          height: 8,
+        },
+        {
+          requestId: request.id,
+          signerId: signer.id,
+          type: FieldType.CHECKBOX,
+          name: 'I agree to the terms',
+          key: 'agree',
+          pageNumber: 1,
+          x: 50,
+          y: 80,
+          width: 6,
+          height: 6,
+        },
+      ],
     });
     await this.recordEvent(request.id, SignatureEventType.CREATED, null, {
       createdBy: 'demo',
@@ -1134,10 +1255,131 @@ export class SignaturesService {
       .digest('hex');
   }
 
-  private async fieldsForDocument(documentId: string) {
-    // Placeholder: field positions come from template definitions; when signing
-    // from a template, fields are hydrated here. See docs/Architecture.md.
-    return [];
+  /** The placements this signer must fill on this request. */
+  private async requestFieldsForSigner(requestId: string, signerId: string) {
+    return this.prisma.requestField.findMany({
+      where: { requestId, signerId },
+      orderBy: [{ pageNumber: 'asc' }, { createdAt: 'asc' }],
+    });
+  }
+
+  /**
+   * A document's template placements, bound later to concrete signers.
+   *
+   * `assigneeOrder` indexes the request's signers, so a template written for two
+   * signers refuses to send to one instead of dropping the second signer's
+   * fields without saying so.
+   */
+  private async loadTemplatePlacements(
+    templateId: string | null,
+    signerCount: number,
+  ): Promise<TemplateField[]> {
+    if (!templateId) return [];
+    const fields = await this.prisma.templateField.findMany({
+      where: { templateId },
+      orderBy: [{ pageNumber: 'asc' }, { createdAt: 'asc' }],
+    });
+    const outOfRange = fields.find((field) => field.assigneeOrder >= signerCount);
+    if (outOfRange) {
+      throw new BadRequestException(
+        `Template field '${outOfRange.name ?? outOfRange.type}' is assigned to signer ` +
+          `${outOfRange.assigneeOrder + 1}, but this request has ${signerCount} signer(s)`,
+      );
+    }
+    // An attachment is placeable and editable, but the signing room cannot yet
+    // collect a file into a request. Sending anyway would hand the signer a
+    // required field they can never satisfy, so the envelope is refused where the
+    // sender can still act on it. This is the one type still short of end-to-end.
+    const attachment = fields.find((field) => field.type === FieldType.ATTACHMENT);
+    if (attachment) {
+      throw new BadRequestException(
+        `Template field '${attachment.name ?? attachment.type}' is an attachment, which a signing ` +
+          'room cannot collect yet: remove it before sending',
+      );
+    }
+    return fields;
+  }
+
+  /**
+   * Copies template placements onto the request and binds each to the signer row
+   * that `assigneeOrder` names. A copy, not a reference: template updates replace
+   * their fields wholesale, and a live request's placements (and its evidence)
+   * must not change under it.
+   */
+  private placementsForRequest(
+    requestId: string,
+    placements: TemplateField[],
+    signers: Array<{ id: string; orderIndex: number }>,
+  ): Prisma.RequestFieldCreateManyInput[] {
+    const signerByOrder = new Map(signers.map((s) => [s.orderIndex, s.id]));
+    return placements.map((field) => ({
+      requestId,
+      signerId: signerByOrder.get(field.assigneeOrder) ?? null,
+      type: field.type,
+      name: field.name,
+      key: field.key,
+      isRequired: field.isRequired,
+      pageNumber: field.pageNumber,
+      x: field.x,
+      y: field.y,
+      width: field.width,
+      height: field.height,
+      options: field.options ?? undefined,
+    }));
+  }
+
+  /**
+   * Validates the values a signer submitted against their placements, and
+   * refuses the signature if a required one is missing.
+   *
+   * A request with no placements (every request that predates templates carrying
+   * fields, and the demo's own) enforces nothing, which is why this is keyed off
+   * the placements rather than off the caller having sent a `fields` payload.
+   */
+  private async resolveFieldValues(
+    requestId: string,
+    signerId: string,
+    input: FieldValueInput[] | undefined,
+  ): Promise<Array<{ id: string; value: unknown }>> {
+    const requested = await this.requestFieldsForSigner(requestId, signerId);
+    if (requested.length === 0) return [];
+
+    const submitted = new Map((input ?? []).map((f) => [f.id, f.value]));
+    const unknown = [...submitted.keys()].filter((id) => !requested.some((f) => f.id === id));
+    if (unknown.length) {
+      throw new BadRequestException(`Unknown field(s) for this signer: ${unknown.join(', ')}`);
+    }
+
+    const isEmpty = (value: unknown) =>
+      value === undefined || value === null || (typeof value === 'string' && value.trim() === '');
+
+    const missing = requested.filter((f) => f.isRequired && isEmpty(submitted.get(f.id)));
+    if (missing.length) {
+      throw new BadRequestException(
+        `Complete the required field(s) first: ${missing.map((f) => f.name ?? f.type).join(', ')}`,
+      );
+    }
+
+    return requested
+      .filter((f) => submitted.has(f.id))
+      .map((f) => ({ id: f.id, value: submitted.get(f.id) }));
+  }
+
+  /** Writes the signer's values onto the placements, timestamped as evidence. */
+  private async captureFieldValues(values: Array<{ id: string; value: unknown }>): Promise<void> {
+    if (!values.length) return;
+    const filledAt = new Date();
+    await this.prisma.$transaction(
+      values.map((field) =>
+        this.prisma.requestField.update({
+          where: { id: field.id },
+          data: {
+            value: field.value === null ? Prisma.JsonNull : (field.value as Prisma.InputJsonValue),
+            filledAt,
+          },
+        }),
+      ),
+    );
   }
 
   private async enqueueInvites(requestId: string, signerIds: string[]): Promise<void> {

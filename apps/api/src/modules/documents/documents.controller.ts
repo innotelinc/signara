@@ -23,6 +23,8 @@ class UploadDto {
   @IsOptional() @IsString() description?: string;
   @IsOptional() @IsString() workspaceId?: string;
   @IsOptional() @IsArray() @IsString({ each: true }) tags?: string[];
+  /** Attach the document to a template, so its placed fields reach the signer. */
+  @IsOptional() @IsString() templateId?: string;
 }
 
 class DocumentQueryDto {

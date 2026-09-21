@@ -66,6 +66,22 @@ for a signer who may not act yet, and `signerId` is required when a parallel
 request releases several signers at once, because guessing could put the device in
 the wrong hands.
 
+### Placed fields a signer fills
+
+A template's placements are copied onto the request at send time and **bound to
+the signer who owns them** (`TemplateField.assigneeOrder` → `RequestField.signerId`),
+so a signing session exposes only that signer's own fields — never another
+signer's. The binding is also an authorization check on write: `sign()` matches
+every submitted value against the placements for _that request and that signer_
+and refuses an id it does not own, so a guest token cannot fill or overwrite a
+value belonging to someone else on the same envelope. Required placements are
+enforced in the API, not only in the page: a signature is refused while a required
+field is blank. Each captured value carries a `filledAt` timestamp, is stored as
+JSON so a checkbox stays a boolean, and is returned per signer in the evidence
+report (`GET /signatures/requests/:id/evidence`) together with the count recorded
+on the `SIGNED` event. What a signer typed is therefore evidence a reader can see,
+not a hidden request parameter.
+
 ### There is no password door
 
 Sign-in is OIDC-only, and there is no second way in — not in the API, and not in

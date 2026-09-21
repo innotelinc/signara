@@ -2,6 +2,7 @@ import { Test } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import {
   DocumentStatus,
+  FieldType,
   SignatureEventType,
   SigningMode,
   SignerRole,
@@ -35,6 +36,8 @@ describe('SignaturesService', () => {
     document: { findFirst: jest.fn(), findUniqueOrThrow: jest.fn(), update: jest.fn() },
     signature: { create: jest.fn() },
     signatureEvent: { create: jest.fn(), findMany: jest.fn() },
+    templateField: { findMany: jest.fn() },
+    requestField: { findMany: jest.fn(), createMany: jest.fn(), update: jest.fn() },
     $transaction: jest.fn((operations: Promise<unknown>[]) => Promise.all(operations)),
   };
 
@@ -47,6 +50,7 @@ describe('SignaturesService', () => {
   } as unknown as ConfigService;
   const minioMock = {
     getBuffer: jest.fn().mockResolvedValue(Buffer.from('pdf-bytes')),
+    getPresignedUrl: jest.fn().mockResolvedValue('https://minio.test/document.pdf'),
   } as unknown as MinioService;
 
   const user = {
@@ -65,6 +69,12 @@ describe('SignaturesService', () => {
     // between cases (`findUnique` is set to a value by the webhook tests).
     prismaMock.signingRequest.findUnique.mockReset();
     webhooksMock.emit.mockReset().mockResolvedValue(1);
+    // Reset rather than clear: `clearAllMocks` leaves implementations, and these
+    // two must answer an array (a request with no placements) for every case that
+    // does not set them up itself.
+    prismaMock.templateField.findMany.mockReset().mockResolvedValue([]);
+    prismaMock.requestField.findMany.mockReset().mockResolvedValue([]);
+    prismaMock.requestField.update.mockReset().mockResolvedValue({});
     configValues = {
       'reminders.afterDays': 3,
       'reminders.max': 3,
@@ -545,6 +555,246 @@ describe('SignaturesService', () => {
           type: SignatureEventType.SIGNED,
           ipAddress: '10.0.0.9',
           metadata: expect.objectContaining({ inPerson: true }),
+        }),
+      });
+    });
+  });
+
+  describe('placed fields reaching a signer (issue #81)', () => {
+    const templateField = (over: Record<string, unknown> = {}) => ({
+      id: 'tf-1',
+      templateId: 'tpl-1',
+      type: FieldType.NAME,
+      name: 'Full name',
+      key: 'full_name',
+      isRequired: true,
+      pageNumber: 1,
+      assigneeOrder: 0,
+      x: 10,
+      y: 60,
+      width: 30,
+      height: 6,
+      options: null,
+      createdAt: new Date('2026-09-01T00:00:00Z'),
+      ...over,
+    });
+
+    const documentRow = { id: 'doc-1', status: 'DRAFT', title: 'Contract', templateId: 'tpl-1' };
+
+    const requestRow = {
+      id: 'req-1',
+      organizationId: 'org-1',
+      documentId: 'doc-1',
+      status: 'AWAITING_SIGNATURE',
+      mode: 'SEQUENTIAL',
+      signers: [
+        { id: 's-1', email: 'a@x.io', role: SignerRole.SIGNER, orderIndex: 0, status: 'INVITED' },
+        { id: 's-2', email: 'b@x.io', role: SignerRole.SIGNER, orderIndex: 1, status: 'PENDING' },
+      ],
+      document: documentRow,
+    };
+
+    const signingSigner = (over: Record<string, unknown> = {}) => ({
+      id: 's-1',
+      requestId: 'req-1',
+      email: 'a@x.io',
+      role: SignerRole.SIGNER,
+      status: SignerStatus.VIEWED,
+      orderIndex: 0,
+      authMethod: null,
+      userId: null,
+      token: 'sgn_token_one',
+      request: {
+        status: DocumentStatus.AWAITING_SIGNATURE,
+        documentId: 'doc-1',
+        mode: SigningMode.PARALLEL,
+        organizationId: 'org-1',
+        deadline: null,
+        document: {
+          id: 'doc-1',
+          title: 'Contract',
+          fileName: 'contract.pdf',
+          fileKey: 'org-1/documents/doc-1.pdf',
+        },
+      },
+      ...over,
+    });
+
+    const primeSign = () => {
+      prismaMock.signer.findUnique.mockResolvedValue(signingSigner());
+      prismaMock.document.findUniqueOrThrow.mockResolvedValue({
+        id: 'doc-1',
+        fileKey: 'org-1/documents/doc-1.pdf',
+      });
+      prismaMock.signature.create.mockResolvedValue({
+        id: 'sig-1',
+        type: 'TYPED',
+        certificateSerial: null,
+        certificateId: null,
+      });
+      prismaMock.signingRequest.findUnique.mockResolvedValue({
+        id: 'req-1',
+        documentId: 'doc-1',
+        signers: [],
+      });
+    };
+
+    const placementRow = (over: Record<string, unknown> = {}) => ({
+      id: 'rf-1',
+      requestId: 'req-1',
+      signerId: 's-1',
+      type: FieldType.NAME,
+      name: 'Full name',
+      key: 'full_name',
+      isRequired: true,
+      pageNumber: 1,
+      ...over,
+    });
+
+    it('copies a template\u2019s placements onto the request, binding each to its signer', async () => {
+      prismaMock.signingRequest.create.mockResolvedValue(requestRow);
+      prismaMock.signingRequest.findUniqueOrThrow.mockResolvedValue(requestRow);
+      prismaMock.document.findFirst.mockResolvedValue(documentRow);
+      prismaMock.templateField.findMany.mockResolvedValue([
+        templateField(),
+        templateField({
+          id: 'tf-2',
+          type: FieldType.DATE,
+          name: 'Date',
+          key: 'date',
+          assigneeOrder: 1,
+        }),
+      ]);
+
+      await service.createRequest(user, {
+        documentId: 'doc-1',
+        signers: [
+          { email: 'a@x.io', orderIndex: 0 },
+          { email: 'b@x.io', orderIndex: 1 },
+        ],
+      });
+
+      expect(prismaMock.requestField.createMany).toHaveBeenCalledTimes(1);
+      const data = prismaMock.requestField.createMany.mock.calls[0][0].data;
+      expect(data).toHaveLength(2);
+      // The binding is the whole point: placement -> concrete signer row, in the
+      // order the sender chose, not by matching on email or position later.
+      expect(data[0]).toEqual(
+        expect.objectContaining({ requestId: 'req-1', signerId: 's-1', key: 'full_name' }),
+      );
+      expect(data[1]).toEqual(
+        expect.objectContaining({ requestId: 'req-1', signerId: 's-2', key: 'date' }),
+      );
+    });
+
+    it('refuses a placement aimed at a signer the request does not have', async () => {
+      prismaMock.document.findFirst.mockResolvedValue(documentRow);
+      prismaMock.templateField.findMany.mockResolvedValue([
+        templateField({ id: 'tf-9', name: 'Notary', assigneeOrder: 2 }),
+      ]);
+
+      await expect(
+        service.createRequest(user, {
+          documentId: 'doc-1',
+          signers: [{ email: 'a@x.io', orderIndex: 0 }],
+        }),
+      ).rejects.toThrow('assigned to signer 3');
+      expect(prismaMock.signingRequest.create).not.toHaveBeenCalled();
+    });
+
+    it('refuses an attachment placement, which a signing room cannot collect', async () => {
+      prismaMock.document.findFirst.mockResolvedValue(documentRow);
+      prismaMock.templateField.findMany.mockResolvedValue([
+        templateField({ id: 'tf-3', type: FieldType.ATTACHMENT, name: 'ID scan', key: 'id_scan' }),
+      ]);
+
+      await expect(
+        service.createRequest(user, {
+          documentId: 'doc-1',
+          signers: [{ email: 'a@x.io', orderIndex: 0 }],
+        }),
+      ).rejects.toThrow('cannot collect yet');
+    });
+
+    it('gives a signer only their own placements in the public session', async () => {
+      prismaMock.signer.findUnique.mockResolvedValue(signingSigner());
+      prismaMock.requestField.findMany.mockResolvedValue([placementRow()]);
+
+      const session = await service.publicSession('sgn_token_one', {});
+
+      expect(prismaMock.requestField.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { requestId: 'req-1', signerId: 's-1' } }),
+      );
+      expect(session.requestedFields).toEqual([placementRow()]);
+    });
+
+    it('refuses a signature while a required placed field is blank', async () => {
+      primeSign();
+      prismaMock.requestField.findMany.mockResolvedValue([placementRow()]);
+
+      await expect(
+        service.sign(
+          'sgn_token_one',
+          { type: 'TYPED' },
+          { ipAddress: '10.0.0.9', userAgent: 'tablet' },
+        ),
+      ).rejects.toThrow('Complete the required field(s) first: Full name');
+      expect(prismaMock.signature.create).not.toHaveBeenCalled();
+      expect(prismaMock.requestField.update).not.toHaveBeenCalled();
+    });
+
+    it('refuses a value for a field that is not this signer\u2019s', async () => {
+      primeSign();
+      prismaMock.requestField.findMany.mockResolvedValue([placementRow({ isRequired: false })]);
+
+      await expect(
+        service.sign(
+          'sgn_token_one',
+          { type: 'TYPED', fields: [{ id: 'rf-someone-else', value: 'x' }] },
+          { ipAddress: '10.0.0.9', userAgent: 'tablet' },
+        ),
+      ).rejects.toThrow('Unknown field(s) for this signer');
+    });
+
+    it('records the values the signer supplied and counts them in the trail', async () => {
+      primeSign();
+      prismaMock.requestField.findMany.mockResolvedValue([
+        placementRow(),
+        placementRow({
+          id: 'rf-2',
+          type: FieldType.CHECKBOX,
+          name: 'I agree',
+          key: 'agree',
+          isRequired: true,
+        }),
+      ]);
+
+      await service.sign(
+        'sgn_token_one',
+        {
+          type: 'TYPED',
+          fields: [
+            { id: 'rf-1', value: 'Ada Lovelace' },
+            { id: 'rf-2', value: true },
+          ],
+        },
+        { ipAddress: '10.0.0.9', userAgent: 'tablet' },
+      );
+
+      expect(prismaMock.requestField.update).toHaveBeenCalledTimes(2);
+      expect(prismaMock.requestField.update).toHaveBeenCalledWith({
+        where: { id: 'rf-1' },
+        data: { value: 'Ada Lovelace', filledAt: expect.any(Date) },
+      });
+      // A checkbox stays a boolean in the evidence rather than flattening to a
+      // string that a reader has to re-interpret.
+      expect(prismaMock.requestField.update).toHaveBeenCalledWith({
+        where: { id: 'rf-2' },
+        data: { value: true, filledAt: expect.any(Date) },
+      });
+      expect(prismaMock.signatureEvent.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          metadata: expect.objectContaining({ fieldsCaptured: 2 }),
         }),
       });
     });

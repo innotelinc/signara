@@ -32,12 +32,19 @@ export class DocumentsService {
   async upload(
     user: AuthenticatedUser,
     file: Express.Multer.File,
-    data: { title?: string; workspaceId?: string; tags?: string[]; description?: string },
+    data: {
+      title?: string;
+      workspaceId?: string;
+      tags?: string[];
+      description?: string;
+      templateId?: string;
+    },
   ) {
     const orgId = user.org?.id;
     if (!orgId) throw new ForbiddenException('No active tenant');
     if (!file) throw new BadRequestException('A document file is required');
     if (data.workspaceId) await this.assertWorkspaceInTenant(orgId, data.workspaceId);
+    if (data.templateId) await this.assertTemplateInTenant(orgId, data.templateId);
 
     const extension = ALLOWED_TYPES.get(file.mimetype);
     if (!extension) {
@@ -62,6 +69,7 @@ export class DocumentsService {
       data: {
         organizationId: orgId,
         workspaceId: data.workspaceId,
+        templateId: data.templateId,
         title,
         description: data.description,
         fileName: file.originalname,
@@ -279,6 +287,19 @@ export class DocumentsService {
         bytes.subarray(8, 12).toString('ascii') === 'WEBP'
       );
     return false;
+  }
+
+  /**
+   * A document's template is where its placed fields come from at send time, so
+   * it has to belong to the caller's tenant — otherwise a document could be
+   * pointed at another organization's field definitions.
+   */
+  private async assertTemplateInTenant(organizationId: string, templateId: string): Promise<void> {
+    const template = await this.prisma.template.findFirst({
+      where: { id: templateId, organizationId },
+      select: { id: true },
+    });
+    if (!template) throw new NotFoundException('Template not found in the active organization');
   }
 
   private async assertWorkspaceInTenant(

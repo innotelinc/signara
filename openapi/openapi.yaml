@@ -398,6 +398,12 @@ paths:
                 title: { type: string }
                 description: { type: string }
                 workspaceId: { type: string, format: uuid }
+                templateId:
+                  type: string
+                  format: uuid
+                  description: >-
+                    Attach the document to a template. The template's placed
+                    fields become the signer's fields when it is sent.
                 tags:
                   type: array
                   items: { type: string }
@@ -1697,11 +1703,43 @@ components:
         key: { type: string, nullable: true }
         isRequired: { type: boolean, default: true }
         pageNumber: { type: integer, minimum: 1, default: 1 }
+        assigneeOrder:
+          type: integer
+          minimum: 0
+          default: 0
+          description: >-
+            Which signer fills this field, by their order index in the request
+            (0 = the first signer). Sending to fewer signers than a field is
+            assigned to is refused, so a placement is never silently dropped.
         x: { type: integer, nullable: true }
         y: { type: integer, nullable: true }
         width: { type: integer, nullable: true }
         height: { type: integer, nullable: true }
         options: { type: object, nullable: true }
+    RequestField:
+      type: object
+      description: >-
+        A template placement copied onto a live request at send time and bound to
+        the signer who must fill it, with the value they supplied.
+      properties:
+        id: { type: string, format: uuid }
+        requestId: { type: string, format: uuid }
+        signerId: { type: string, format: uuid, nullable: true }
+        type: { $ref: '#/components/schemas/TemplateField/properties/type' }
+        name: { type: string, nullable: true }
+        key: { type: string, nullable: true }
+        isRequired: { type: boolean, default: true }
+        pageNumber: { type: integer, minimum: 1, default: 1 }
+        x: { type: integer, nullable: true }
+        y: { type: integer, nullable: true }
+        width: { type: integer, nullable: true }
+        height: { type: integer, nullable: true }
+        options: { type: object, nullable: true }
+        value:
+          description: >-
+            The value supplied, as JSON: a checkbox stays a boolean and a dropdown
+            keeps its option. Absent means unanswered.
+        filledAt: { type: string, format: date-time, nullable: true }
     TemplateCreate:
       type: object
       required: [name]
@@ -1936,6 +1974,20 @@ components:
         signatureValue:
           { type: string, description: Base64 cryptographic signature produced by the key holder }
         signatureFormat: { type: string, example: RSA-SHA256 }
+        fields:
+          type: array
+          description: >-
+            Values for the placed fields returned in `requestedFields`. A required
+            field left blank refuses the signature.
+          items:
+            type: object
+            required: [id]
+            properties:
+              id: { type: string, format: uuid, description: A `requestedFields` entry's id }
+              value:
+                description: >-
+                  The answer, as JSON so a checkbox stays a boolean; omitted or blank
+                  means unanswered, which a required field refuses.
     SigningSession:
       type: object
       properties:
@@ -1963,7 +2015,11 @@ components:
         authMethod: { type: string, enum: [email, oidc, certificate] }
         requestedFields:
           type: array
-          description: Field definitions when signing from a template
+          description: >-
+            The placed fields this signer must fill, copied from the document's
+            template at send time and bound to them. Other signers' fields are
+            never returned.
+          items: { $ref: '#/components/schemas/RequestField' }
     EvidenceReport:
       type: object
       properties:
@@ -1993,6 +2049,10 @@ components:
                   status: { $ref: '#/components/schemas/SignerStatus' }
                   signedAt: { type: string, format: date-time, nullable: true }
                   authMethod: { type: string, nullable: true }
+                  fields:
+                    type: array
+                    description: The placed fields this signer filled, with their values
+                    items: { $ref: '#/components/schemas/RequestField' }
                   signatures:
                     type: array
                     items: { $ref: '#/components/schemas/Signature' }

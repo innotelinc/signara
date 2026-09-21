@@ -170,6 +170,7 @@ export function TemplateEditorClient({ templateId }: { templateId: string }) {
       key: null,
       isRequired: true,
       pageNumber: activePage,
+      assigneeOrder: 0,
       x: base % 60,
       y: base % 50,
       width: spec.defaultSize.width,
@@ -291,6 +292,14 @@ export function TemplateEditorClient({ templateId }: { templateId: string }) {
         <div className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
       )}
 
+      {fields.some((f) => f.type === 'ATTACHMENT') && (
+        <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+          An attachment field can be placed and saved, but a signing room cannot collect a file yet:
+          a request using this template is refused at send time. Remove the attachment field before
+          sending, or collect the file outside Signara.
+        </div>
+      )}
+
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[240px_1fr_280px]">
         {/* Palette */}
         <Card className="h-fit">
@@ -383,6 +392,11 @@ export function TemplateEditorClient({ templateId }: { templateId: string }) {
                       <Icon className="h-3 w-3 shrink-0" />
                       <span className="truncate">{field.name ?? field.type}</span>
                     </span>
+                    {field.assigneeOrder > 0 && (
+                      <span className="absolute -left-1.5 -top-1.5 rounded-sm bg-primary-600 px-1 text-[9px] font-semibold text-white">
+                        S{field.assigneeOrder + 1}
+                      </span>
+                    )}
                     {isSelected && (
                       <span
                         onPointerDown={(e) => onPointerDown(e, field, 'resize')}
@@ -434,6 +448,28 @@ export function TemplateEditorClient({ templateId }: { templateId: string }) {
                     value={selected.name ?? ''}
                     onChange={(e) => updateField(selected.id, { name: e.target.value })}
                   />
+                </div>
+                <div>
+                  <label className="label" htmlFor="field-signer">
+                    Filled by signer
+                  </label>
+                  <input
+                    id="field-signer"
+                    type="number"
+                    className="input"
+                    min={1}
+                    max={50}
+                    value={selected.assigneeOrder + 1}
+                    onChange={(e) =>
+                      updateField(selected.id, {
+                        assigneeOrder: Math.max(0, Number(e.target.value) - 1),
+                      })
+                    }
+                  />
+                  <p className="mt-1 text-xs text-slate-400">
+                    Which signer fills this field, in signing order (1 = first). Sending to fewer
+                    signers than a field is assigned to is refused.
+                  </p>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
