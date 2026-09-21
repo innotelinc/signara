@@ -468,7 +468,12 @@ paths:
       summary: Get a time-limited presigned download URL
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
-        - { name: version, in: query, schema: { type: integer, minimum: 1 }, description: Optional version number }
+        - {
+            name: version,
+            in: query,
+            schema: { type: integer, minimum: 1 },
+            description: Optional version number,
+          }
       responses:
         '200':
           description: Presigned URL (valid 15 min)
@@ -710,6 +715,44 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/EvidenceReport' }
+  /signatures/requests/{id}/in-person-session:
+    post:
+      tags: [signatures]
+      x-tenant-required: true
+      summary: Hand the signing session to a signer who is present, for signing on this device
+      description: >-
+        In-person signing. Returns the same signing link an invitation email
+        would carry, for an operator to open on the device being handed over, so
+        the signer signs with no email round trip. The handover is recorded as a
+        `HANDED_OVER` audit event rather than an `INVITED` one, and the signer is
+        marked `in_person` so the evidence says how the signature was collected.
+        Refused when the signer may not act yet, which is why `signerId` is
+        required when more than one signer may sign at once.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                signerId: { type: string, format: uuid, nullable: true }
+      responses:
+        '200':
+          description: The signer's signing link, to open on this device
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  requestId: { type: string, format: uuid }
+                  signerId: { type: string, format: uuid }
+                  signerEmail: { type: string, format: email }
+                  url: { type: string, format: uri }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
   /signatures/public/{token}:
     get:
       tags: [signatures]
@@ -1041,7 +1084,12 @@ paths:
                   - $ref: '#/components/schemas/ApiKey'
                   - type: object
                     properties:
-                      key: { type: string, example: sgn_abcd..., description: Store safely — shown once }
+                      key:
+                        {
+                          type: string,
+                          example: sgn_abcd...,
+                          description: Store safely — shown once,
+                        }
   /api-keys/{id}:
     delete:
       tags: [api-keys]
@@ -1111,7 +1159,11 @@ paths:
               properties:
                 certificatePem: { type: string, description: End-entity certificate in PEM }
                 chainPem: { type: string, description: 'Intermediates + root (PEM), optional' }
-                privateKeyPem: { type: string, description: 'Signing private key (PEM), optional — encrypted at rest' }
+                privateKeyPem:
+                  {
+                    type: string,
+                    description: 'Signing private key (PEM), optional — encrypted at rest',
+                  }
                 provider: { $ref: '#/components/schemas/CertificateProvider' }
                 validationLevel: { type: string, enum: [DV, OV, EV] }
                 commonName: { type: string }
@@ -1136,9 +1188,14 @@ paths:
               required: [provider, commonName]
               properties:
                 provider: { $ref: '#/components/schemas/CertificateProvider' }
-                commonName: { type: string, description: Subject CN — signer email for person certificates }
+                commonName:
+                  { type: string, description: Subject CN — signer email for person certificates }
                 email: { type: string, format: email }
-                options: { type: object, description: 'Provider-specific (ACME dns handler, Cerulean template, ...)' }
+                options:
+                  {
+                    type: object,
+                    description: 'Provider-specific (ACME dns handler, Cerulean template, ...)',
+                  }
       responses:
         '201':
           description: Provisioned and stored certificate
@@ -1337,7 +1394,7 @@ components:
       type: apiKey
       in: header
       name: X-API-Key
-      description: "API key created via POST /api-keys, e.g. `X-API-Key: sgn_...`"
+      description: 'API key created via POST /api-keys, e.g. `X-API-Key: sgn_...`'
   responses:
     BadRequest:
       description: Validation or business rule violation
@@ -1449,7 +1506,7 @@ components:
         taxId: { type: string }
         branding:
           type: object
-          description: "colors/logo overrides, e.g. { \"primaryColor\": \"#0F62FE\" }"
+          description: 'colors/logo overrides, e.g. { "primaryColor": "#0F62FE" }'
     OrganizationDetail:
       allOf:
         - $ref: '#/components/schemas/Organization'
@@ -1619,7 +1676,23 @@ components:
         id: { type: string, format: uuid }
         type:
           type: string
-          enum: [SIGNATURE, INITIAL, DATE, TEXT, CHECKBOX, DROPDOWN, ATTACHMENT, NAME, EMAIL, COMPANY, JOB_TITLE, PHONE, ADDRESS, CUSTOM]
+          enum:
+            [
+              SIGNATURE,
+              INITIAL,
+              DATE,
+              TEXT,
+              CHECKBOX,
+              DROPDOWN,
+              ATTACHMENT,
+              NAME,
+              EMAIL,
+              COMPANY,
+              JOB_TITLE,
+              PHONE,
+              ADDRESS,
+              CUSTOM,
+            ]
         name: { type: string, nullable: true }
         key: { type: string, nullable: true }
         isRequired: { type: boolean, default: true }
@@ -1664,7 +1737,22 @@ components:
       enum: [TYPED, DRAWN, UPLOADED, CERTIFICATE]
     SignatureEventType:
       type: string
-      enum: [CREATED, INVITED, VIEWED, SIGNED, DECLINED, REMINDED, EXPIRED, CANCELLED, VOIDED, APPROVED, REJECTED, DOWNLOADED, EMAIL_FAILED]
+      enum:
+        [
+          CREATED,
+          INVITED,
+          VIEWED,
+          SIGNED,
+          DECLINED,
+          REMINDED,
+          EXPIRED,
+          CANCELLED,
+          VOIDED,
+          APPROVED,
+          REJECTED,
+          DOWNLOADED,
+          EMAIL_FAILED,
+        ]
     SigningRequestCreate:
       type: object
       required: [documentId, signers]
@@ -1759,7 +1847,8 @@ components:
         certificateId: { type: string, format: uuid, nullable: true }
         certificateSerial: { type: string, nullable: true }
         signedHash: { type: string, nullable: true }
-        signatureValue: { type: string, nullable: true, description: Detached cryptographic signature (base64) }
+        signatureValue:
+          { type: string, nullable: true, description: Detached cryptographic signature (base64) }
         signatureFormat: { type: string, nullable: true, example: RSA-SHA256 }
         cryptoAlgorithm: { type: string, nullable: true }
         identityAssurance: { $ref: '#/components/schemas/IdentityAssurance' }
@@ -1838,8 +1927,14 @@ components:
         signedHash: { type: string, description: SHA-256 hex binding document + signer + request }
         cryptoAlgorithm: { type: string, default: SHA-256 }
         signatureData: { type: string }
-        certificateId: { type: string, format: uuid, description: Certificate to bind (required for CERTIFICATE signatures) }
-        signatureValue: { type: string, description: Base64 cryptographic signature produced by the key holder }
+        certificateId:
+          {
+            type: string,
+            format: uuid,
+            description: Certificate to bind (required for CERTIFICATE signatures),
+          }
+        signatureValue:
+          { type: string, description: Base64 cryptographic signature produced by the key holder }
         signatureFormat: { type: string, example: RSA-SHA256 }
     SigningSession:
       type: object

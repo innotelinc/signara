@@ -2,7 +2,18 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, ArrowRight, Check, Mail, Plus, Send, Trash2, UserPlus, Users } from 'lucide-react';
+import {
+  ArrowLeft,
+  ArrowRight,
+  Check,
+  Handshake,
+  Mail,
+  Plus,
+  Send,
+  Trash2,
+  UserPlus,
+  Users,
+} from 'lucide-react';
 import { api, ApiError } from '@/lib/api';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -23,10 +34,16 @@ export function SendWizardClient({ documentId }: { documentId: string }) {
   const [step, setStep] = useState<Step>('signers');
   const [signers, setSigners] = useState<SignerDraft[]>([]);
   const [mode, setMode] = useState<'SEQUENTIAL' | 'PARALLEL'>('SEQUENTIAL');
+  // In-person signing (#88): nobody is emailed, the request is created and this
+  // device is handed to the signer. `sendInvites: false` on its own used to be a
+  // dead end — nothing could hand the signer their link — which is the gap this
+  // closes.
+  const [deliverInPerson, setDeliverInPerson] = useState(false);
   const [message, setMessage] = useState('');
   const [deadline, setDeadline] = useState('');
   const [title, setTitle] = useState('');
   const [sending, setSending] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
   const [created, setCreated] = useState<CreatedSigningRequest | null>(null);
   const [draftEmail, setDraftEmail] = useState('');
   const [draftName, setDraftName] = useState('');
@@ -65,7 +82,10 @@ export function SendWizardClient({ documentId }: { documentId: string }) {
       setDraftError('A signing request supports at most 50 signers');
       return;
     }
-    setSigners((prev) => [...prev, { email, name: draftName.trim() || undefined, role: draftRole, orderIndex: prev.length }]);
+    setSigners((prev) => [
+      ...prev,
+      { email, name: draftName.trim() || undefined, role: draftRole, orderIndex: prev.length },
+    ]);
     setDraftEmail('');
     setDraftName('');
     setDraftRole('SIGNER');
@@ -73,7 +93,9 @@ export function SendWizardClient({ documentId }: { documentId: string }) {
   };
 
   const removeSigner = (email: string) => {
-    setSigners((prev) => prev.filter((s) => s.email !== email).map((s, i) => ({ ...s, orderIndex: i })));
+    setSigners((prev) =>
+      prev.filter((s) => s.email !== email).map((s, i) => ({ ...s, orderIndex: i })),
+    );
   };
 
   const moveSigner = (index: number, delta: -1 | 1) => {
@@ -86,7 +108,10 @@ export function SendWizardClient({ documentId }: { documentId: string }) {
     });
   };
 
-  const sequentialOrder = useMemo(() => [...signers].sort((a, b) => a.orderIndex - b.orderIndex), [signers]);
+  const sequentialOrder = useMemo(
+    () => [...signers].sort((a, b) => a.orderIndex - b.orderIndex),
+    [signers],
+  );
 
   const canContinue = useMemo(() => {
     if (signers.length === 0) return false;
@@ -103,8 +128,13 @@ export function SendWizardClient({ documentId }: { documentId: string }) {
         message: message.trim() || undefined,
         deadline: deadline ? new Date(deadline).toISOString() : undefined,
         mode,
-        signers: signers.map((s) => ({ email: s.email, name: s.name, role: s.role, orderIndex: s.orderIndex })),
-        sendInvites: true,
+        signers: signers.map((s) => ({
+          email: s.email,
+          name: s.name,
+          role: s.role,
+          orderIndex: s.orderIndex,
+        })),
+        sendInvites: !deliverInPerson,
       });
       setCreated(result);
       setStep('review');
@@ -112,6 +142,26 @@ export function SendWizardClient({ documentId }: { documentId: string }) {
       setError(err instanceof ApiError ? err.message : 'Failed to send signing request');
     } finally {
       setSending(false);
+    }
+  }
+
+  /**
+   * Opens the signer's signing room on this device. The URL is the same one the
+   * invitation email would have carried, so the room behaves identically — the
+   * difference is only that no email was sent and the handover is audited.
+   */
+  async function startInPerson(requestId: string, signerId: string) {
+    setBusy(`in-person-${signerId}`);
+    setError(null);
+    try {
+      const { url } = await api.post<{ url: string }>(
+        `/api/v1/signatures/requests/${requestId}/in-person-session`,
+        { signerId },
+      );
+      window.location.assign(url);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not start the in-person session');
+      setBusy(null);
     }
   }
 
@@ -125,6 +175,12 @@ export function SendWizardClient({ documentId }: { documentId: string }) {
 
   // Success state
   if (created) {
+    const signedSigners = created.signers.filter((s) => s.role !== 'CC');
+    // Sequential releases one signer at a time, so there is exactly one link to
+    // open; parallel releases them together, and the operator has to say which
+    // one is standing there.
+    const handoverSigners =
+      created.mode === 'SEQUENTIAL' ? signedSigners.slice(0, 1) : signedSigners;
     return (
       <div className="mx-auto max-w-xl">
         <Card>
@@ -132,12 +188,24 @@ export function SendWizardClient({ documentId }: { documentId: string }) {
             <span className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-emerald-50">
               <Check className="h-7 w-7 text-emerald-600" />
             </span>
-            <h1 className="text-xl font-semibold">Request sent!</h1>
-            <p className="mt-2 text-sm text-slate-500">
-              {created.signers.filter((s) => s.role !== 'CC').length} signer(s) invited to{' '}
-              <strong>{created.signers[0]?.email}</strong>
-              {created.signers.length > 1 ? ` and ${created.signers.length - 1} more` : ''} via email.
-            </p>
+            <h1 className="text-xl font-semibold">
+              {deliverInPerson ? 'Ready to sign' : 'Request sent!'}
+            </h1>
+            {deliverInPerson ? (
+              <p className="mt-2 text-sm text-slate-500">
+                No email was sent. Hand this device to{' '}
+                <strong>{signedSigners[0]?.name ?? signedSigners[0]?.email}</strong>
+                {signedSigners.length > 1 ? ` (and ${signedSigners.length - 1} more)` : ''} and open
+                the signing room below.
+              </p>
+            ) : (
+              <p className="mt-2 text-sm text-slate-500">
+                {signedSigners.length} signer(s) invited to{' '}
+                <strong>{created.signers[0]?.email}</strong>
+                {created.signers.length > 1 ? ` and ${created.signers.length - 1} more` : ''} via
+                email.
+              </p>
+            )}
             <div className="mt-6 grid w-full grid-cols-2 gap-3 text-left">
               <div className="rounded-lg border border-slate-200 p-4">
                 <p className="text-xs uppercase tracking-wide text-slate-400">Mode</p>
@@ -148,6 +216,23 @@ export function SendWizardClient({ documentId }: { documentId: string }) {
                 <p className="mt-1 font-medium">{created.status.replaceAll('_', ' ')}</p>
               </div>
             </div>
+            {deliverInPerson && handoverSigners.length > 0 && (
+              <div className="mt-6 w-full space-y-2">
+                {handoverSigners.map((signer) => (
+                  <Button
+                    key={signer.id}
+                    className="w-full"
+                    onClick={() => void startInPerson(created.id, signer.id)}
+                    loading={busy === `in-person-${signer.id}`}
+                  >
+                    <Handshake className="h-4 w-4" />
+                    {handoverSigners.length === 1
+                      ? 'Open the signing room on this device'
+                      : `Sign now — ${signer.name ?? signer.email}`}
+                  </Button>
+                ))}
+              </div>
+            )}
             <div className="mt-8 flex gap-3">
               <Link href={`/documents/${doc?.id}`} className="btn-outline">
                 <ArrowLeft className="h-4 w-4" />
@@ -201,7 +286,9 @@ export function SendWizardClient({ documentId }: { documentId: string }) {
       <ol className="mb-8 flex items-center gap-2 text-sm" aria-label="Wizard steps">
         {steps.map((s, i) => {
           const active = s.id === step;
-          const done = (active ? steps.findIndex((x) => x.id === step) : i) < steps.findIndex((x) => x.id === step);
+          const done =
+            (active ? steps.findIndex((x) => x.id === step) : i) <
+            steps.findIndex((x) => x.id === step);
           return (
             <li key={s.id} className="flex items-center gap-2">
               <button
@@ -210,7 +297,11 @@ export function SendWizardClient({ documentId }: { documentId: string }) {
                   if (i <= steps.findIndex((x) => x.id === step)) setStep(s.id);
                 }}
                 className={`flex items-center gap-2 rounded-full px-3 py-1 font-medium ${
-                  active ? 'bg-primary-500 text-white' : done ? 'text-primary-600' : 'text-slate-500'
+                  active
+                    ? 'bg-primary-500 text-white'
+                    : done
+                      ? 'text-primary-600'
+                      : 'text-slate-500'
                 }`}
               >
                 <span
@@ -229,7 +320,9 @@ export function SendWizardClient({ documentId }: { documentId: string }) {
       </ol>
 
       {error && (
-        <div className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
+        <div className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {error}
+        </div>
       )}
 
       {step === 'signers' && (
@@ -239,7 +332,9 @@ export function SendWizardClient({ documentId }: { documentId: string }) {
               <Users className="h-4 w-4" />
               Recipients
             </CardTitle>
-            <CardDescription>Add everyone who needs to sign, approve, or receive a copy.</CardDescription>
+            <CardDescription>
+              Add everyone who needs to sign, approve, or receive a copy.
+            </CardDescription>
           </CardHeader>
           <CardContent>
             <div className="mb-4 grid grid-cols-1 gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 sm:grid-cols-[1fr_1fr_auto_auto]">
@@ -298,7 +393,13 @@ export function SendWizardClient({ documentId }: { documentId: string }) {
                       <p className="text-xs text-slate-400">{ROLE_LABEL[signer.role]}</p>
                     </div>
                     <div className="flex items-center gap-1">
-                      <Button variant="ghost" size="sm" onClick={() => moveSigner(index, -1)} disabled={index === 0} aria-label="Move up">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => moveSigner(index, -1)}
+                        disabled={index === 0}
+                        aria-label="Move up"
+                      >
                         ↑
                       </Button>
                       <Button
@@ -310,7 +411,12 @@ export function SendWizardClient({ documentId }: { documentId: string }) {
                       >
                         ↓
                       </Button>
-                      <Button variant="ghost" size="sm" onClick={() => removeSigner(signer.email)} aria-label="Remove">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => removeSigner(signer.email)}
+                        aria-label="Remove"
+                      >
                         <Trash2 className="h-4 w-4 text-red-500" />
                       </Button>
                     </div>
@@ -340,6 +446,51 @@ export function SendWizardClient({ documentId }: { documentId: string }) {
           </CardHeader>
           <CardContent className="space-y-5">
             <div>
+              <span className="label">Delivery</span>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <label
+                  className={`flex cursor-pointer items-start gap-3 rounded-lg border p-4 ${
+                    !deliverInPerson ? 'border-primary-500 bg-primary-50' : 'border-slate-200'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="delivery"
+                    className="mt-1"
+                    checked={!deliverInPerson}
+                    onChange={() => setDeliverInPerson(false)}
+                  />
+                  <div>
+                    <p className="font-medium">Email each recipient</p>
+                    <p className="text-sm text-slate-500">
+                      Each signer gets their own signing link by email.
+                    </p>
+                  </div>
+                </label>
+                <label
+                  className={`flex cursor-pointer items-start gap-3 rounded-lg border p-4 ${
+                    deliverInPerson ? 'border-primary-500 bg-primary-50' : 'border-slate-200'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="delivery"
+                    className="mt-1"
+                    checked={deliverInPerson}
+                    onChange={() => setDeliverInPerson(true)}
+                  />
+                  <div>
+                    <p className="font-medium">Sign in person</p>
+                    <p className="text-sm text-slate-500">
+                      No email is sent. The signer signs on this device, and the handover is
+                      recorded in the audit trail.
+                    </p>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            <div>
               <span className="label">Signing order</span>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <label
@@ -357,7 +508,8 @@ export function SendWizardClient({ documentId }: { documentId: string }) {
                   <div>
                     <p className="font-medium">Sequential</p>
                     <p className="text-sm text-slate-500">
-                      Each recipient signs in turn — recommended for contracts. Others are released one at a time.
+                      Each recipient signs in turn — recommended for contracts. Others are released
+                      one at a time.
                     </p>
                   </div>
                 </label>
@@ -375,7 +527,9 @@ export function SendWizardClient({ documentId }: { documentId: string }) {
                   />
                   <div>
                     <p className="font-medium">Parallel</p>
-                    <p className="text-sm text-slate-500">Everyone can sign at the same time — fastest for internal approvals.</p>
+                    <p className="text-sm text-slate-500">
+                      Everyone can sign at the same time — fastest for internal approvals.
+                    </p>
                   </div>
                 </label>
               </div>
@@ -385,7 +539,12 @@ export function SendWizardClient({ documentId }: { documentId: string }) {
               <label className="label" htmlFor="wizard-title">
                 Request title
               </label>
-              <input id="wizard-title" className="input" value={title} onChange={(e) => setTitle(e.target.value)} />
+              <input
+                id="wizard-title"
+                className="input"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+              />
             </div>
 
             <div>
@@ -448,6 +607,12 @@ export function SendWizardClient({ documentId }: { documentId: string }) {
                 <dt className="text-slate-500">Mode</dt>
                 <dd className="font-medium capitalize">{mode.toLowerCase()}</dd>
               </div>
+              <div className="flex justify-between gap-4">
+                <dt className="text-slate-500">Delivery</dt>
+                <dd className="font-medium">
+                  {deliverInPerson ? 'In person (this device)' : 'Email'}
+                </dd>
+              </div>
               {title && (
                 <div className="flex justify-between gap-4">
                   <dt className="text-slate-500">Request title</dt>
@@ -502,7 +667,8 @@ export function SendWizardClient({ documentId }: { documentId: string }) {
             </div>
             <div className="mt-4 flex items-center gap-2 text-xs text-slate-400">
               <Plus className="h-3 w-3" />
-              Each recipient receives a secure email with a personal signing link. Invites are sent immediately.
+              Each recipient receives a secure email with a personal signing link. Invites are sent
+              immediately.
             </div>
           </CardContent>
         </Card>

@@ -124,6 +124,11 @@ enum SignatureEventType {
   REJECTED
   DOWNLOADED
   EMAIL_FAILED
+  // In-person signing: an operator obtained this signer's signing session and
+  // handed the device over, rather than an invitation going out by email. Its
+  // own value because the two are different facts about how a signature was
+  // collected, and the evidence trail must not read one as the other.
+  HANDED_OVER
 }
 
 enum WorkflowRuleAction {

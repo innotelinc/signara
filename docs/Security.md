@@ -26,7 +26,9 @@
 - **Session revocation:** suspend → revoke all sessions (admin API).
 - **Signing sessions:** public but credential-based — tokens are 192-bit
   random (`sgn_...`), never logged, expire with the request, and one view/sign
-  per token per signer.
+  per token per signer. The link is normally delivered by email; in-person
+  signing lets an operator obtain the same link for a signer who is present, and
+  that handover is audited (see § 2).
 
 ### The user/guest boundary
 
@@ -49,6 +51,20 @@ external party an account in order to receive a signature would pull them into
 the identity plane this estate gates every other surface on, for no gain: the
 token is already a stronger, narrower credential than a login would be. Recorded
 here so it is not "fixed" later.
+
+**A token can also be handed over, and that is audited.** In-person signing
+(#88) lets an operator holding `signing.send` fetch a waiting signer's link and
+open it on the device being handed over instead of emailing it. The credential is
+the same token either way and the signer's room is unchanged, so this does not
+widen what a signer may do — but it does mean a signed-in user can obtain a guest
+credential, which is worth stating rather than leaving implicit. What keeps it
+honest is the record: the handover is its own `HANDED_OVER` event (`INVITED`
+would read as an emailed invitation), and the signer is marked `in_person`, which
+the signature carries — so the evidence shows that the IP and user agent on an
+in-person signature are the _operator's_ device, not the signer's. It is refused
+for a signer who may not act yet, and `signerId` is required when a parallel
+request releases several signers at once, because guessing could put the device in
+the wrong hands.
 
 ### There is no password door
 
