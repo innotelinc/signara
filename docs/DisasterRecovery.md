@@ -198,7 +198,9 @@ The dump is therefore taken **where the database is**, on the edge host, by
 Cerulean's `scripts/authentik-db-backup.sh` (daily, retention and a Prometheus
 status file of its own — `cerulean_authentik_backup_last_status`,
 `_last_success_timestamp`, `_last_size_bytes`, `_mirror_offhost`). Nothing in
-this stack should be pointed at that PostgreSQL any more.
+this stack should be pointed at that PostgreSQL any more. How that dump is
+watched — including the case a job that never runs cannot report — is Cerulean's
+`docs/identity-backup.md`.
 
 The coupling is reported, not assumed: `IDENTITY_EXPECTED` in `infra/backup/`
 is 0 unless `AUTHENTIK_POSTGRES_PASSWORD` is set, and
