@@ -31,6 +31,15 @@ MIRROR_OFFHOST=0
 # identity backup that is silently absent is a gap found during a restore.
 IDENTITY_COVERED=0
 
+# Whether identity is *expected* to be in this backup. It is when a target is
+# configured; it is not when the identity plane lives on another host this stack
+# cannot reach (a docker network does not span hosts), where the host that owns
+# it dumps it instead (1-primary/cerulean/scripts/authentik-db-backup.sh). The
+# distinction is what keeps IdentityDatabaseNotBackedUp honest: it must fire when
+# a configured dump goes missing, and stay quiet when identity is out of scope —
+# not the other way round.
+IDENTITY_EXPECTED=0
+
 log() { echo "[backup] $*"; }
 
 endpoint_host() { # strip scheme, credentials, port and path off an S3 endpoint
@@ -73,6 +82,7 @@ finish() {
         echo "signara_backup_remote_enabled 0"
       fi
       echo "signara_backup_mirror_offhost $MIRROR_OFFHOST"
+      echo "signara_backup_identity_expected $IDENTITY_EXPECTED"
       echo "signara_backup_identity_covered $IDENTITY_COVERED"
     } > "$STATUS_FILE"
     log "backup completed successfully"
@@ -81,6 +91,7 @@ finish() {
     remote_enabled="$(carried_over signara_backup_remote_enabled)"
     remote_success="$(carried_over signara_backup_remote_last_success_timestamp)"
     remote_offhost="$(carried_over signara_backup_mirror_offhost)"
+    identity_expected="$(carried_over signara_backup_identity_expected)"
     identity_covered="$(carried_over signara_backup_identity_covered)"
     {
       echo "signara_backup_last_status 0"
@@ -88,6 +99,7 @@ finish() {
       [[ -n "$remote_enabled" ]] && echo "signara_backup_remote_enabled $remote_enabled"
       [[ -n "$remote_success" ]] && echo "signara_backup_remote_last_success_timestamp $remote_success"
       [[ -n "$remote_offhost" ]] && echo "signara_backup_mirror_offhost $remote_offhost"
+      [[ -n "$identity_expected" ]] && echo "signara_backup_identity_expected $identity_expected"
       [[ -n "$identity_covered" ]] && echo "signara_backup_identity_covered $identity_covered"
     } > "$STATUS_FILE"
     log "backup failed (exit $code)" >&2
@@ -111,6 +123,7 @@ backup_database "db" "${POSTGRES_HOST:-postgres}" "${POSTGRES_USER:-signara}" \
   "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}" "${POSTGRES_DB:-signara}"
 
 if [[ -n "${AUTHENTIK_POSTGRES_PASSWORD:-}" ]]; then
+  IDENTITY_EXPECTED=1
   backup_database "authentik-db" "${AUTHENTIK_POSTGRES_HOST:-authentik-db}" \
     "${AUTHENTIK_POSTGRES_USER:-authentik}" "$AUTHENTIK_POSTGRES_PASSWORD" \
     "${AUTHENTIK_POSTGRES_DB:-authentik}"
@@ -119,6 +132,10 @@ else
   log "WARNING: AUTHENTIK_POSTGRES_PASSWORD is unset — the identity database is"
   log "WARNING: not in this backup, so a restore would bring back the documents"
   log "WARNING: without the accounts that reach them (docs/DisasterRecovery.md §2)."
+  log "WARNING: if the identity plane lives on another host, that host must dump"
+  log "WARNING: it (1-primary/cerulean/scripts/authentik-db-backup.sh); this run"
+  log "WARNING: reports signara_backup_identity_expected 0 so it is not mistaken"
+  log "WARNING: for a coverage gap here."
 fi
 
 : "${SOURCE_S3_ENDPOINT:?SOURCE_S3_ENDPOINT is required for object backup}"

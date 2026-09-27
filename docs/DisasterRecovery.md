@@ -15,7 +15,7 @@
 | PostgreSQL (all tables)                                      | `pg_dump -Fc` (custom)                              | `infra/backup/backup.sh` → `/backup-cache` → **off-host S3 mirror** (required for durability, §2) |
 | Object storage (documents, signature images, template files) | `mc mirror` / `scripts/migrate-object-store.mjs`    | same job; enable bucket versioning on the target                                                  |
 | Configuration                                                | `.env`, `docker-compose*.yml`, `infra/`, `openapi/` | git (repository is the source of truth)                                                           |
-| Authentik (IdP)                                              | its own backups                                     | configure separately — identity metadata matters (see § 5)                                        |
+| Authentik (IdP)                                              | Cerulean's dump, on Cerulean's host                 | not in this stack's job — a docker network does not span hosts (see § 5)                         |
 
 The backup container (`docker-compose.prod.yml` -> `backup` service) runs
 `backup.sh` at `BACKUP_INTERVAL_SECONDS` intervals and records Prometheus-exportable
@@ -187,15 +187,27 @@ alongside Signara:
 - its PostgreSQL (`authentik-db`) via the same pg_dump approach;
 - its config (blueprints) in git via Authentik's export/import.
 
-On this deployment Authentik is **Cerulean's**, not this stack's: the backup
-service joins Cerulean's network and dumps `cerulean-authentik-postgres` (see
-`docker-compose.override.prod.yml`). Setting `AUTHENTIK_POSTGRES_PASSWORD` is what
-switches that dump on, and `signara_backup_identity_covered` reports whether it is
-on — 0 raises `IdentityDatabaseNotBackedUp`, because a restore that returns the
-documents without the accounts that reach them is found on the day someone tries
-to log in, not before. That cross-project credential is a coupling to remove when
-Cerulean backs up its own identity database; until then, rotation of
-`AUTHENTIK_POSTGRESQL_PASSWORD` in Cerulean's `.env` must be mirrored here.
+On this deployment Authentik is **Cerulean's**, not this stack's, and it runs on
+Cerulean's host — the same host as the NPM edge. Signara used to dump
+`cerulean-authentik-postgres` from here, by joining Cerulean's docker network.
+That stopped being possible: Signara runs on a server of its own, and a docker
+network does not span hosts, so the old path had already been failing silently
+before it was removed.
+
+The dump is therefore taken **where the database is**, on the edge host, by
+Cerulean's `scripts/authentik-db-backup.sh` (daily, retention and a Prometheus
+status file of its own — `cerulean_authentik_backup_last_status`,
+`_last_success_timestamp`, `_last_size_bytes`, `_mirror_offhost`). Nothing in
+this stack should be pointed at that PostgreSQL any more.
+
+The coupling is reported, not assumed: `IDENTITY_EXPECTED` in `infra/backup/`
+is 0 unless `AUTHENTIK_POSTGRES_PASSWORD` is set, and
+`signara_backup_identity_expected` publishes it. `IdentityDatabaseNotBackedUp`
+is gated on that flag, so it fires when this stack is *configured* to cover the
+identity database and then fails to — and stays quiet when the job rightly
+lives elsewhere. A restore that returns the documents without the accounts that
+reach them is found on the day someone tries to log in, not before, which is why
+the two cases are distinguished rather than both being silent.
 
 If the IdP is lost but Signara's DB survives, users can authenticate again only
 after re-provisioning Authentik users **with the same email addresses** —

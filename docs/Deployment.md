@@ -88,13 +88,10 @@ COMPOSE="docker compose -f docker-compose.prod.yml -f docker-compose.override.pr
 
 **Using `-f docker-compose.prod.yml` alone is a real footgun, not a shortcut on
 this host.** `docker-compose.override.prod.yml` carries this deployment's
-topology, and a bare `up -d` silently undoes three things at once:
+topology, and a bare `up -d` silently undoes two things at once:
 
-- `backup` loses the external `cerulean` network, so the identity dump fails
-  with `could not translate host name "cerulean-authentik-postgres"` and
-  `BackupJobFailed` fires — while the documents still restore, which is the
-  worst version of a backup problem to discover late.
-- the `monitoring` profile stops applying, so Grafana and Loki (deliberately
+- the `monitoring` profile stops applying, so Prometheus, Grafana, Loki,
+  Alertmanager and the backup container (deliberately
   left down) get started by what looks like a routine command.
 - nothing on the host is re-`build`-ed, so it is easy to believe the run was a
   no-op.
@@ -182,11 +179,21 @@ dumps and an object archive to the persistent `backupcache` volume. Configure al
 retention; set `BACKUP_REQUIRE_REMOTE=true` so a missing mirror **fails** the run
 instead of downgrading it to local-only.
 
-The identity database is dumped when `AUTHENTIK_POSTGRES_PASSWORD` is set, since
-it is not part of every deployment: in this estate Authentik belongs to Cerulean,
-and the production overlay joins that stack's network to reach it. Coverage is
-reported as `signara_backup_identity_covered`, so a stack whose dumps contain no
-logins says so instead of looking complete.
+The identity database is **not** part of this job. In this estate Authentik
+belongs to Cerulean and lives on Cerulean's host, so Cerulean dumps it there
+(`1-primary/cerulean/scripts/authentik-db-backup.sh`); this stack used to reach
+it by joining Cerulean's docker network, which only ever worked while both ran
+on one host. The dump is dumped when `AUTHENTIK_POSTGRES_PASSWORD` is set — the
+switch that keeps a self-contained deployment from failing every run against a
+database it does not have.
+
+What the stack *is* configured for is published rather than assumed:
+`IDENTITY_EXPECTED` is 1 only when that password is set, and
+`signara_backup_identity_expected` reports it. `IdentityDatabaseNotBackedUp` is
+gated on it, so a run that is meant to cover the identity plane and does not
+still alerts, while a host that rightly leaves the job to Cerulean stays quiet —
+the documents and the logins that reach them are protected by two jobs on two
+hosts, each reporting on its own.
 
 A mirror is required, not optional: the `backupcache` volume sits on the host whose
 database it protects. Whether that mirror is _somewhere else_ is what

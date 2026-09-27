@@ -28,19 +28,17 @@ services:
     profiles: ['monitoring']
   backup:
     profiles: ['monitoring']
-    # The identity plane on this host is Cerulean's Authentik, not a database in
-    # this stack, so the backup joins Cerulean's network to dump it. Without this
-    # the restore brings the documents back but not the logins — and the
-    # identity-coverage metric would be 0, which is what raises the alert.
-    networks:
-      - default
-      - cerulean
+    # The identity plane is not in this stack: Authentik is Cerulean's, and it
+    # runs on the host that owns it (192.168.1.71), where Cerulean dumps it
+    # (1-primary/cerulean/scripts/authentik-db-backup.sh). Signara used to reach
+    # that database by joining Cerulean's docker network, which worked only while
+    # Signara ran on the same host; it now runs on 192.168.1.44, and a docker
+    # network does not span hosts. Rather than fail every run trying to reach an
+    # unreachable database, the identity dump is explicitly out of scope here:
+    # the empty password switches it off in backup.sh, and
+    # `signara_backup_identity_expected` reports 0 so the identity-coverage alert
+    # does not fire for a host that does not hold the identity plane.
     environment:
-      AUTHENTIK_POSTGRES_HOST: ${AUTHENTIK_POSTGRES_HOST:-cerulean-authentik-postgres}
+      AUTHENTIK_POSTGRES_PASSWORD: ""
   backup-metrics:
     profiles: ['monitoring']
-
-networks:
-  cerulean:
-    external: true
-    name: cerulean_default
