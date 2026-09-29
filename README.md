@@ -15,6 +15,7 @@ PostgreSQL, Redis, MinIO, and Meilisearch**.
 [![Release](https://github.com/innotelinc/signara/actions/workflows/release.yml/badge.svg)](https://github.com/innotelinc/signara/actions/workflows/release.yml)
 [![Latest release](https://img.shields.io/github/v/release/innotelinc/signara?color=16a34a)](https://github.com/innotelinc/signara/releases)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0--or--later-brightgreen.svg)](LICENSE)
+[![Theme: Unity](https://img.shields.io/badge/theme-Unity-6366f1)](https://github.com/innotelinc/innotel-platform-stack/blob/main/standards/unity/README.md)
 
 </div>
 
