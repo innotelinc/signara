@@ -23,6 +23,16 @@ warn() { echo "alertmanager-entrypoint: $*" >&2; }
 : "${SMTP_PASS:=}"
 : "${SMTP_FROM:=}"
 : "${ALERT_EMAIL_TO:=}"
+# The FQDN Alertmanager says EHLO with. A single label (`localhost`, or the
+# container's own name) is refused by a strict relay — Stalwart answers
+# `550 5.5.0 Invalid EHLO domain` — so default to a dotted name rather than
+# leaving Go's `localhost` in place.
+: "${SMTP_HELLO:=signara.innotel.us}"
+# Whether to skip verifying the relay's TLS certificate. Only ever `true` or
+# `false`, and validated below: it is substituted unquoted so Alertmanager
+# parses a YAML boolean, and anything else would be a config that does not
+# load.
+: "${SMTP_TLS_INSECURE:=false}"
 
 if [ -z "$SMTP_HOST" ]; then
   # Falling back to the host's own MTA keeps the config parseable and the UI
@@ -45,6 +55,14 @@ if [ -z "$SMTP_FROM" ]; then
   SMTP_FROM=alertmanager@signara.invalid
 fi
 
+case "$SMTP_TLS_INSECURE" in
+  true | false) ;;
+  *)
+    warn "SMTP_TLS_INSECURE must be 'true' or 'false', got '$SMTP_TLS_INSECURE': using false."
+    SMTP_TLS_INSECURE=false
+    ;;
+esac
+
 # Escape the characters sed treats specially in a replacement.
 escape() { printf '%s' "$1" | sed -e 's/[\\&|]/\\&/g'; }
 
@@ -54,6 +72,8 @@ sed \
   -e "s|\${SMTP_USER}|$(escape "$SMTP_USER")|g" \
   -e "s|\${SMTP_PASS}|$(escape "$SMTP_PASS")|g" \
   -e "s|\${SMTP_FROM}|$(escape "$SMTP_FROM")|g" \
+  -e "s|\${SMTP_HELLO}|$(escape "$SMTP_HELLO")|g" \
+  -e "s|\${SMTP_TLS_INSECURE}|$(escape "$SMTP_TLS_INSECURE")|g" \
   -e "s|\${ALERT_EMAIL_TO}|$(escape "$ALERT_EMAIL_TO")|g" \
   "$template" > "$rendered"
 

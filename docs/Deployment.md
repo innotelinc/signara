@@ -125,11 +125,33 @@ notification workers use (`SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/`SMTP_PASS`). If
 those are unset the stack still evaluates rules and shows them in the Alertmanager
 UI, and the container says so at start — but nobody is told, so set them.
 
+Alertmanager also has to say *who* it is: it speaks `EHLO` with the container's
+hostname, which Go defaults to `localhost`, and a strict relay refuses a
+single-label name (`Stalwart` answers `550 5.5.0 Invalid EHLO domain`). Set
+`SMTP_HELLO` to a dotted FQDN (it defaults to `signara.innotel.us`) or delivery
+fails after a connection that otherwise looks healthy.
+
+If the relay offers `STARTTLS` with a certificate that does not name the
+address dialled — an internal relay reached by IP, typically self-signed —
+Alertmanager refuses it (`x509: cannot validate certificate for <ip>`). Set
+`SMTP_TLS_INSECURE=true` to keep `STARTTLS` and skip verification; leave it
+unset for a relay with a real certificate. Prefer the certificate over this
+switch when you have the choice.
+
 Note which relay you can actually use: hosts that block outbound port 25 cannot
 deliver mail directly to a recipient's MX, so this needs an **authenticated relay
 on 587 (or 465)**. `ALERT_EMAIL_TO` addresses a real mailbox; the previous
 `platform-critical@`/`platform@`/`oncall@` addresses were never provisioned, so
 critical alerts were addressed to nowhere.
+
+The estate resolves this with its **own** mail server rather than an external
+relay: Stalwart on `192.168.1.15`, which the other stacks use too. Point
+`SMTP_HOST`/`SMTP_PORT` at it (`192.168.1.15:25`), leave `SMTP_USER`/`SMTP_PASS`
+empty — it accepts LAN senders unauthenticated — and set `ALERT_EMAIL_TO` to a
+mailbox on a domain it serves (`admin@innotel.us`). Its certificate is
+self-signed and names no address, so this deployment also sets
+`SMTP_TLS_INSECURE=true`: `STARTTLS` still encrypts the hop, but Alertmanager
+cannot verify the certificate and refuses to send until told to skip it.
 
 `infra/monitoring/alertmanager/alertmanager.yml` is a template: Alertmanager has
 no environment expansion, so `entrypoint.sh` substitutes it at container start and

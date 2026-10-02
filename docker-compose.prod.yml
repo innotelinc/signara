@@ -366,6 +366,14 @@ services:
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASS: ${SMTP_PASS:-}
       SMTP_FROM: ${SMTP_FROM:-}
+      # The FQDN Alertmanager says EHLO with. Left unset it renders as
+      # `localhost`, which a strict relay (Stalwart) refuses with
+      # `550 5.5.0 Invalid EHLO domain`; the entrypoint defaults it to a dotted
+      # name when empty.
+      SMTP_HELLO: ${SMTP_HELLO:-signara.innotel.us}
+      # `true` keeps STARTTLS but skips verifying the relay's certificate; set
+      # it for an internal relay reached by IP with a self-signed certificate.
+      SMTP_TLS_INSECURE: ${SMTP_TLS_INSECURE:-false}
       ALERT_EMAIL_TO: ${ALERT_EMAIL_TO:-}
     volumes:
       - ./infra/monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro

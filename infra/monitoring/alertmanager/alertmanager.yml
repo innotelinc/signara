@@ -9,6 +9,13 @@
 # delivers nowhere. Configure the relay in .env (SMTP_HOST/SMTP_PORT/SMTP_USER/
 # SMTP_PASS, the same mail identity the app's notification workers use) and set
 # ALERT_EMAIL_TO to a mailbox somebody actually reads.
+#
+# `hello` is not optional when the relay is a real MTA: Alertmanager says EHLO
+# with the container's own hostname (Go's net/smtp defaults it to `localhost`),
+# and a strict server — Stalwart, the estate's mail server, is one — answers
+# `550 5.5.0 Invalid EHLO domain` because a single label is not a domain. Name
+# the FQDN this host speaks as here; delivery then works and the failure is no
+# longer a log line nobody reads.
 global:
   smtp_smarthost: '${SMTP_HOST}:${SMTP_PORT}'
   smtp_from: '${SMTP_FROM}'
@@ -32,6 +39,16 @@ receivers:
   - name: email
     email_configs:
       - to: '${ALERT_EMAIL_TO}'
+        hello: '${SMTP_HELLO}'
+        # Alertmanager verifies the relay's certificate against the address it
+        # dialled. An internal relay reached by IP with a self-signed
+        # certificate (Stalwart here presents `rcgen self signed cert`, SAN
+        # `localhost`) cannot satisfy that, so the opt-out is explicit rather
+        # than a silent drop to plaintext: SMTP_TLS_INSECURE=true keeps
+        # STARTTLS and skips verification. Leave it false for a relay with a
+        # certificate that names the address.
+        tls_config:
+          insecure_skip_verify: ${SMTP_TLS_INSECURE}
         send_resolved: true
         headers:
           Subject: >-

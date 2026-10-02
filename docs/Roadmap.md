@@ -313,19 +313,16 @@ what is owed to users in place of the history.
       each name is served with the expected SAN. The ACME path is DNS-01 through
       Cerulean/Technitium (`_acme-challenge` records) — that is what issued them,
       and it is still the path renewal takes (`CERULEAN_RENEW_DAYS=30`).
-- [ ] **Mail: there is no path at all — this is not a deliverability check.**
-      **Decided 2026-09-21: the estate will run its own mail server rather than
-      choose a relay**, so this is waiting on that rather than undecided.
-      `SMTP_HOST` is empty in the live `.env`, so `EmailService.isConfigured()` is
-      false, every invite, reminder and completion mail is skipped, and the worker
-      records the notification `SENT` rather than `DELIVERED` — so nothing
-      surfaces it. "Verify SPF/DKIM/DMARC" was the wrong question: no relay is
-      configured anywhere in the estate, outbound port 25 is blocked, and no SMTP
-      credentials exist. The signing domain's mail is therefore **unauthenticated
-      _and_ undelivered**, and completion email is the product's most visible
-      surface. Remaining: stand up the in-house server, point `SMTP_*` and
-      `ALERT_EMAIL_TO` at it, then publish SPF/DKIM/DMARC for
-      `signara.innotel.us`.
+- [~] **Mail: the path now exists; the signing domain still needs
+      authentication.** **Decided 2026-09-21: the estate runs its own mail server
+      rather than choose a relay** — and it now does: Stalwart on
+      `192.168.1.15`, which serves `innotel.us` and accepts LAN senders on 25 with
+      `STARTTLS`. The live `.env` points `SMTP_HOST`/`SMTP_PORT` at it and sets
+      `ALERT_EMAIL_TO`, so Alertmanager delivers (W6 below). Still open: point
+      `SMTP_FROM` at a mailbox Stalwart will accept for `signara.innotel.us` (or
+      move the signing identity onto the served domain) and publish
+      SPF/DKIM/DMARC for that domain — `EmailService.isConfigured()` is no longer
+      the blocker, the *authenticated* half of "mail authenticated" is.
 - [x] Re-point anything still describing "sign-platform" in docs/comments — **done
       2026-09-19**: an estate-wide audit found no live references outside the
       retirement record itself, and the `sign` repo's forward-looking claims (README,
@@ -373,8 +370,8 @@ so `provision.py` cannot express them; they are managed by Cerulean directly.
       (2026-09-20) runs seed mode monthly and keeps the log as an artifact, so the
       restore path is exercised between operator drills rather than only when someone
       remembers to run it.
-- [~] Monitoring on the api/web/queue — **Prometheus and Alertmanager now run on
-  the host (2026-09-20); delivery is still open.** All three scrape targets are
+- [x] Monitoring on the api/web/queue — **closed 2026-10-02: Prometheus and
+  Alertmanager run on the host and now deliver.** All three scrape targets are
   up (`signara-api`, `signara-backup`, `prometheus`) and the rules evaluate: the
   only alert firing is `BackupIsLocalOnly`, which is the correct reading, not a
   false positive. Starting it exposed two defects, both fixed: the MinIO scrape
@@ -383,13 +380,23 @@ so `provision.py` cannot express them; they are managed by Cerulean directly.
   used `${SMTP_PASSWORD}` against `smtp.example.com`, which Alertmanager cannot
   expand — `amtool check-config` reported SUCCESS on it while the receiver sent
   nowhere. The config is now rendered from `.env` at container start.
-  **Still open: a destination.** The estate has no working mail path — every
-  `SMTP_HOST` across the stacks is empty, no relay credentials exist, and
-  outbound port 25 is blocked, so direct-to-MX delivery is impossible and the
-  container warns that it cannot deliver. Alerts are visible in the Alertmanager
-  UI (loopback, unauthenticated) meanwhile. Needs an authenticated relay on 587
-  or a webhook; then set `SMTP_HOST`/`SMTP_USER`/`SMTP_PASS` and
-  `ALERT_EMAIL_TO`.
+  **Closed 2026-10-02 — the in-house mail server became the destination.** The
+  estate stood up its own Stalwart on `192.168.1.15` (the same server the other
+  stacks relay through), so `.env` now has `SMTP_HOST=192.168.1.15`,
+  `SMTP_PORT=25` and `ALERT_EMAIL_TO=admin@innotel.us`. Waking it surfaced two
+  defects the roadmap had not named, each a connection that succeeds and
+  delivers nothing. First, Alertmanager speaks `EHLO` with the container
+  hostname, which Go defaults to `localhost`, and Stalwart refuses a single-label
+  name (`550 5.5.0 Invalid EHLO domain`); fixed by a new `SMTP_HELLO` setting
+  (rendered by the entrypoint, default `signara.innotel.us`) on the receiver's
+  `hello:`. Second, Stalwart offers `STARTTLS` with a **self-signed** certificate
+  that names no address (`rcgen self signed cert`, SAN `localhost`), so
+  Alertmanager refuses to send (`x509: cannot validate certificate for
+  192.168.1.15`); fixed by a new `SMTP_TLS_INSECURE` setting (default false) on
+  the receiver's `tls_config.insecure_skip_verify`, which keeps `STARTTLS` and
+  skips verification only where the operator asks. Verified by injecting alerts
+  through the v2 API and reading the dispatched notification in the container
+  log.
 - [x] **An upgrade path written down** — `docs/Deployment.md` §6 (2026-09-20).
       Its original reading was **wrong and has been corrected**: the deployment did
       run registry images (both containers carried `RepoDigests` into images CI
