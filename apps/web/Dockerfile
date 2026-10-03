@@ -52,11 +52,14 @@ RUN npm run build -w @signara/web
 # browser resolves it to the reader's own machine, so sign-in and every API
 # call fail in the field while the container looks perfectly healthy. The
 # build-arg check above stops that arriving through NEXT_PUBLIC_*; this scan
-# catches a loopback value hard-coded in source instead. It is skipped only
-# for the dev build that opted in, where loopback is the point.
+# catches a loopback value hard-coded in source instead. Scan only what the
+# runner copies (standalone + static): webpack's .next/cache holds the same
+# strings during a build but never ships. Skipped only for the dev build that
+# opted in, where loopback is the point.
 RUN set -eu; \
     if [ "$NEXT_PUBLIC_ALLOW_LOOPBACK" != "true" ]; then \
-      offenders="$(grep -rIlE '//(localhost|127\.0\.0\.1):[0-9]+' /app/apps/web/.next 2>/dev/null || true)"; \
+      offenders="$(grep -rIlE '//(localhost|127\.0\.0\.1):[0-9]+' \
+        /app/apps/web/.next/standalone /app/apps/web/.next/static 2>/dev/null || true)"; \
       if [ -n "$offenders" ]; then \
         echo "error: built web bundle references a loopback URL" >&2; \
         printf '%s\n' "$offenders" >&2; \
