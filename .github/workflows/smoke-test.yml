@@ -26,13 +26,15 @@ jobs:
             if curl -fsS --max-time 5 "${{ inputs.base_url }}/ready"; then break; fi
             sleep 5
           done
-          curl -fsS "${{ inputs.base_url }}/ready" | grep -q '"status":"ok"' || exit 1
+          # --max-time on the assertion too: a hung endpoint would otherwise
+          # stall this step until the job's own timeout instead of failing fast.
+          curl -fsS --max-time 15 "${{ inputs.base_url }}/ready" | grep -q '"status":"ok"' || exit 1
 
       - name: Swagger reachable
-        run: curl -fsS -o /dev/null -w "%{http_code}\n" "${{ inputs.base_url }}/api/v1/docs"
+        run: curl -fsS --max-time 15 -o /dev/null -w "%{http_code}\n" "${{ inputs.base_url }}/api/v1/docs"
 
       - name: Metrics exposed (authenticated scrape not required)
-        run: curl -s "${{ inputs.base_url }}/metrics" | grep -q signara_http_requests_total || echo "metrics not exposed — verify Prometheus job"
+        run: curl -s --max-time 15 "${{ inputs.base_url }}/metrics" | grep -q signara_http_requests_total || echo "metrics not exposed — verify Prometheus job"
 
       # The web bundle gets its API URL at *build* time, so an image built
       # without build args serves a login link and API calls pointing at
@@ -40,7 +42,7 @@ jobs:
       # browser, so it is checked explicitly.
       - name: Deployed web app points at a real API, not localhost
         run: |
-          html="$(curl -fsS "${{ inputs.web_url }}/")"
+          html="$(curl -fsS --max-time 15 "${{ inputs.web_url }}/")"
           if grep -q 'localhost' <<<"$html"; then
             echo "::error::${{ inputs.web_url }} serves a bundle built with localhost baked in"
             grep -oE 'https?://localhost:[0-9]+[^" ]*' <<<"$html" | sort -u | head
@@ -57,7 +59,7 @@ jobs:
       # rather than reading Authentik's own form.
       - name: Login page offers no password door
         run: |
-          body="$(curl -fsS "${{ inputs.web_url }}/login")"
+          body="$(curl -fsS --max-time 15 "${{ inputs.web_url }}/login")"
           if grep -qiE 'type="password"|name="password"' <<<"$body"; then
             echo "::error::${{ inputs.web_url }}/login serves a password input — sign-in must be OIDC-only"
             exit 1
