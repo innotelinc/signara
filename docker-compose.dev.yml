@@ -19,6 +19,9 @@ services:
       args:
         NEXT_PUBLIC_API_URL: ${API_URL:-http://localhost:8010}
         NEXT_PUBLIC_WEB_URL: ${WEB_URL:-http://localhost:3010}
+        # Local development is the one build allowed to inline loopback URLs;
+        # any other build (prod, CI) refuses them (see apps/web/Dockerfile).
+        NEXT_PUBLIC_ALLOW_LOOPBACK: 'true'
     container_name: signara-frontend
     restart: unless-stopped
     environment:

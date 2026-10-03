@@ -17,8 +17,34 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
-ARG NEXT_PUBLIC_API_URL=http://localhost:8000
-ARG NEXT_PUBLIC_WEB_URL=http://localhost:3000
+
+# NEXT_PUBLIC_* is inlined into the client bundle at build time, so a build
+# that cannot name the deployment's real URLs ships a bundle whose sign-in
+# link and API calls point at the browser's own machine. That looks like a
+# working deploy and only fails in the browser, so it is made impossible
+# here: both URLs are required, and a loopback URL is refused unless the
+# build explicitly opts in (only the dev compose file does).
+ARG NEXT_PUBLIC_API_URL
+ARG NEXT_PUBLIC_WEB_URL
+ARG NEXT_PUBLIC_ALLOW_LOOPBACK=false
+RUN set -eu; \
+    if [ -z "$NEXT_PUBLIC_API_URL" ] || [ -z "$NEXT_PUBLIC_WEB_URL" ]; then \
+      echo "error: NEXT_PUBLIC_API_URL and NEXT_PUBLIC_WEB_URL are required build args" >&2; \
+      echo "       (NEXT_PUBLIC_* is inlined into the client bundle at build time)" >&2; \
+      exit 1; \
+    fi; \
+    if [ "$NEXT_PUBLIC_ALLOW_LOOPBACK" != "true" ]; then \
+      case "$NEXT_PUBLIC_API_URL $NEXT_PUBLIC_WEB_URL" in \
+        *://localhost*|*://127.0.0.1*) \
+          echo "error: refusing to bake a loopback URL into the web bundle" >&2; \
+          echo "       NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL" >&2; \
+          echo "       NEXT_PUBLIC_WEB_URL=$NEXT_PUBLIC_WEB_URL" >&2; \
+          echo "       Point them at the deployment's public URLs, or pass" >&2; \
+          echo "       --build-arg NEXT_PUBLIC_ALLOW_LOOPBACK=true for local development." >&2; \
+          exit 1; \
+          ;; \
+      esac; \
+    fi
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL NEXT_PUBLIC_WEB_URL=$NEXT_PUBLIC_WEB_URL
 RUN npm run build -w @signara/web
 
