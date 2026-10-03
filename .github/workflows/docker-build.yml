@@ -53,6 +53,13 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=sha,format=long
+            # The compose files default to `:latest`, but metadata-action only
+            # moves `latest` for semver/edge tags, so a plain branch push left
+            # it pinned to an old build. That is how the deployed web bundle
+            # kept a localhost API URL after the build-arg fix shipped: the
+            # corrected image existed as :main/:sha, while `compose pull`
+            # fetched a stale `:latest`. Publish it from the default branch.
+            type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Login to GHCR
         if: github.event_name != 'pull_request'
