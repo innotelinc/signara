@@ -105,20 +105,26 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
-      minio:
-        # MinIO retired its Docker Hub images (pull access denied), so this has
-        # to come from MinIO's own registry — same release, same tag.
-        image: quay.io/minio/minio:RELEASE.2024-09-13T20-26-02Z
-        command: server /data
+      s3:
+        # MinIO no longer serves anonymous pulls from anywhere public — docker.io
+        # `minio/minio` is gone (404) and quay.io `minio/minio` answers 401 — and
+        # this repo has no registry credentials, so MinIO cannot be pulled in CI
+        # at all. The API needs only *an* S3-compatible endpoint: `MinioService`
+        # probes the bucket and creates it at boot, and the smoke steps never
+        # store an object. LocalStack's S3 is public and free, so it is the
+        # fixture here. (Production still runs MinIO; this is a CI stand-in, not
+        # a change to what the stack deploys.)
+        image: localstack/localstack:4
         env:
-          MINIO_ROOT_USER: signara
-          MINIO_ROOT_PASSWORD: signara-secret
-        ports: ["9000:9000"]
+          SERVICES: s3
+          DEFAULT_REGION: us-east-1
+          EAGER_SERVICE_LOADING: "1"
+        ports: ["9000:4566"]
         options: >-
-          --health-cmd "curl -f http://localhost:9000/minio/health/live"
+          --health-cmd "curl -f http://localhost:4566/_localstack/health"
           --health-interval 5s
           --health-timeout 5s
-          --health-retries 10
+          --health-retries 20
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
