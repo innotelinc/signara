@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # provision-edge.sh — make Signara reachable publicly through the NPM edge.
 #   1. DNS: CNAMEs (app/api.signara.<base> -> innotel.us apex) via TSIG nsupdate.
-#   2. NPM proxy hosts: https://app.signara.<base> -> http://192.168.1.46:3000
-#      https://api.signara.<base> -> http://192.168.1.46:8000, and
-#      https://storage.signara.<base> -> http://192.168.1.46:2090 (the
+#   2. NPM proxy hosts: https://app.signara.<base> -> http://192.168.1.71:3000
+#      https://api.signara.<base> -> http://192.168.1.71:8000, and
+#      https://storage.signara.<base> -> http://192.168.1.71:2090 (the
 #      onyx-objectstore that now holds documents — docs/Roadmap.md W3), each
 #      with a single-name Let's Encrypt cert (HTTP-01; NPM wildcard issuance is
 #      broken).
@@ -32,9 +32,9 @@ BIND_TSIG_SECRET="$(env_key BIND_TSIG_SECRET)"
 
 BIND_SERVER="${BIND_SERVER:-192.168.1.80}"
 BIND_TSIG_NAME="${BIND_TSIG_NAME:-cerulean}"
-FORWARD_HOST="${FORWARD_HOST:-192.168.1.46}"
+FORWARD_HOST="${FORWARD_HOST:-192.168.1.71}"
 BASE_DOMAIN="${BASE_DOMAIN:-innotel.us}"
-NPM_API_URL="${NPM_API_URL:-http://192.168.1.46:81}"
+NPM_API_URL="${NPM_API_URL:-http://192.168.1.71:81}"
 ACME_EMAIL="${ACME_EMAIL:-admin@innotel.us}"
 DOMAINS=(app.signara.${BASE_DOMAIN} api.signara.${BASE_DOMAIN} storage.signara.${BASE_DOMAIN})
 # Host ports come from the environment instead of being assumed. The API is

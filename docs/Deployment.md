@@ -248,7 +248,7 @@ CERULEAN_DNS_API_URL=http://localhost:3003
 CERULEAN_ADMIN_PASSWORD=<cerulean-admin-password>
 CERULEAN_BASE_DOMAIN=signara.innotel.us
 CERULEAN_ZONE=innotel.us
-CERULEAN_LAN_IP=192.168.1.46   # NPM upstream only; replace with host LAN IPv4
+CERULEAN_LAN_IP=192.168.1.71   # NPM upstream only; replace with host LAN IPv4
 CERULEAN_WAN_IP=73.68.203.71   # last verified WAN value; DNS only
 CERULEAN_WAN_DISCOVERY_URL=https://api.ipify.org
 ```

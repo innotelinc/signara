@@ -25,7 +25,7 @@ Requirements:
 Recommended Cerulean setup:
 
 ```bash
-CERULEAN_LAN_IP=192.168.1.46
+CERULEAN_LAN_IP=192.168.1.71
 ./setup.sh --production --with-cerulean
 ```
 
