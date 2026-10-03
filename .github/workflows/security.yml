@@ -50,11 +50,21 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        image: [api, web]
+        include:
+          - image: api
+            build_args: ''
+          - image: web
+            # The web Dockerfile requires its NEXT_PUBLIC_* URLs and refuses
+            # loopback values (a localhost bundle is the v0.1.2 login defect),
+            # so the scan build must name non-loopback placeholders. The URLs
+            # do not affect what is scanned.
+            build_args: >-
+              --build-arg NEXT_PUBLIC_API_URL=https://api.signara.invalid
+              --build-arg NEXT_PUBLIC_WEB_URL=https://app.signara.invalid
     steps:
       - uses: actions/checkout@v7
       - name: Build image
-        run: docker build -f apps/${{ matrix.image }}/Dockerfile -t signara-${{ matrix.image }}:scan .
+        run: docker build -f apps/${{ matrix.image }}/Dockerfile ${{ matrix.build_args }} -t signara-${{ matrix.image }}:scan .
       - name: Scan with Grype
         uses: anchore/scan-action@v7
         with:
