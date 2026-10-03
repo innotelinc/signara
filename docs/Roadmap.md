@@ -416,6 +416,28 @@ so `provision.py` cannot express them; they are managed by Cerulean directly.
       of current `main` instead. §6.1 and §6.2 are the two routes (host build, or
       pin `sha-<commit>` and pull); §6.3–§6.5 cover forward-only migrations,
       verification, and rollback.
+- [x] **The localhost sign-in defect, again — but the real cause was CI's
+      tags — closed 2026-10-03.** The deployed app sent sign-in to
+      `http://localhost:8000/api/v1/auth/login` while the API itself already
+      redirected correctly to Cerulean's shared Authentik. Two defects stacked:
+      first, the web Dockerfile still defaulted `NEXT_PUBLIC_*` to localhost, so
+      any build that did not pass the args inlined it (the 2026-09-20 fix
+      guarded CI, not the Dockerfile); second — and this is why the earlier fix
+      never reached production — `docker-build.yml` published only `:main` and
+      `:sha-<commit>`, never `:latest`, while the compose files default to
+      `ghcr.io/innotelinc/signara-web:latest`. The corrected image existed and
+      was simply never pulled. Fixed in the image build: both public URLs are
+      now **required**, a loopback value is **refused** unless a build opts in
+      (`NEXT_PUBLIC_ALLOW_LOOPBACK=true`, only the dev compose file), and a
+      post-build scan fails the image if the emitted bundle still names a
+      loopback origin. Fixed in CI: `latest` is published from the default
+      branch, and the Grype/Trivy container scan (which the new required args
+      had broken) now passes non-loopback placeholders. The smoke test's
+      positive assertion was also dead — it required a closing quote after
+      `login`, which the real `?next=` href never has — so it now fails, not
+      warns, when the sign-in link does not point at the API. The host runs
+      pinned artifacts (`SIGNARA_WEB_IMAGE=…:sha-5515d6e`, `SIGNARA_API_IMAGE=…:sha-a4c8282`),
+      per §6.2.
 
 **Exit:** the restore drill is a dated entry in the DR doc, not a plan — **met,
 including against a production dump on the deployment host** — and the mirror is

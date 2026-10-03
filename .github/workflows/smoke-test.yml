@@ -48,8 +48,13 @@ jobs:
             grep -oE 'https?://localhost:[0-9]+[^" ]*' <<<"$html" | sort -u | head
             exit 1
           fi
-          grep -qE "href=\"${{ inputs.base_url }}/api/v1/auth/login" <<<"$html" \
-            || echo "::warning::no login link to ${{ inputs.base_url }} found on the landing page"
+          # The link is asserted as a prefix, not a whole href: it carries a
+          # ?next= query, and the old pattern required a closing quote right
+          # after `login`, so it never matched and this check passed silently.
+          if ! grep -qF "href=\"${{ inputs.base_url }}/api/v1/auth/login" <<<"$html"; then
+            echo "::error::${{ inputs.web_url }} has no sign-in link to ${{ inputs.base_url }}/api/v1/auth/login"
+            exit 1
+          fi
 
       # Signara is OIDC-only and docs/Security.md says so: there is no password
       # endpoint and the web app ships no auth library. A password input on the

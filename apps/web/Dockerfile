@@ -48,6 +48,22 @@ RUN set -eu; \
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL NEXT_PUBLIC_WEB_URL=$NEXT_PUBLIC_WEB_URL
 RUN npm run build -w @signara/web
 
+# A bundle that still names a loopback origin is the v0.1.2 login defect: the
+# browser resolves it to the reader's own machine, so sign-in and every API
+# call fail in the field while the container looks perfectly healthy. The
+# build-arg check above stops that arriving through NEXT_PUBLIC_*; this scan
+# catches a loopback value hard-coded in source instead. It is skipped only
+# for the dev build that opted in, where loopback is the point.
+RUN set -eu; \
+    if [ "$NEXT_PUBLIC_ALLOW_LOOPBACK" != "true" ]; then \
+      offenders="$(grep -rIlE '//(localhost|127\.0\.0\.1):[0-9]+' /app/apps/web/.next 2>/dev/null || true)"; \
+      if [ -n "$offenders" ]; then \
+        echo "error: built web bundle references a loopback URL" >&2; \
+        printf '%s\n' "$offenders" >&2; \
+        exit 1; \
+      fi; \
+    fi
+
 # ---- runner (standalone output) ------------------------------------------
 FROM node:22-alpine AS runner
 RUN apk add --no-cache libc6-compat && addgroup -S signara && adduser -S signara -G signara
