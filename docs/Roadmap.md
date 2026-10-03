@@ -313,16 +313,19 @@ what is owed to users in place of the history.
       each name is served with the expected SAN. The ACME path is DNS-01 through
       Cerulean/Technitium (`_acme-challenge` records) — that is what issued them,
       and it is still the path renewal takes (`CERULEAN_RENEW_DAYS=30`).
-- [~] **Mail: the path now exists; the signing domain still needs
-      authentication.** **Decided 2026-09-21: the estate runs its own mail server
-      rather than choose a relay** — and it now does: Stalwart on
-      `192.168.1.15`, which serves `innotel.us` and accepts LAN senders on 25 with
-      `STARTTLS`. The live `.env` points `SMTP_HOST`/`SMTP_PORT` at it and sets
-      `ALERT_EMAIL_TO`, so Alertmanager delivers (W6 below). Still open: point
-      `SMTP_FROM` at a mailbox Stalwart will accept for `signara.innotel.us` (or
-      move the signing identity onto the served domain) and publish
-      SPF/DKIM/DMARC for that domain — `EmailService.isConfigured()` is no longer
-      the blocker, the *authenticated* half of "mail authenticated" is.
+- [x] **Mail: the signing domain is authenticated — 2026-10-03.** The estate runs
+      its own mail server (Stalwart on `192.168.1.15`, serving `innotel.us`), and
+      Alertmanager delivers through it (W6). `signara.innotel.us` is now a Stalwart
+      domain with its own DKIM keys, and its SPF, DKIM (ed25519 + rsa) and DMARC
+      records are published in the public zone — verified live, read back from
+      `ns1.innotel.us`. The parent domain's own DKIM keys were published too, so
+      mail actually sent as `@innotel.us` (the receiver's `alertmanager@innotel.us`,
+      a served mailbox) verifies. Two caveats are recorded in the estate ops page
+      (`innotel-platform-stack` `docs/container-placement.md`): the zone refuses
+      Stalwart's TSIG dynamic updates, so these records were published by hand and
+      the keys activated manually — a rotation needs the same hand; and Stalwart
+      still refuses to *relay* unauthenticated mail, so customer-facing mail needs
+      an authenticated submission account before it leaves the estate.
 - [x] Re-point anything still describing "sign-platform" in docs/comments — **done
       2026-09-19**: an estate-wide audit found no live references outside the
       retirement record itself, and the `sign` repo's forward-looking claims (README,
@@ -330,9 +333,13 @@ what is owed to users in place of the history.
       Findings in `1-primary/sign/ARCHIVE.md` §7.
 
 **Exit:** one documented public name set, valid certs, mail authenticated, no
-stale references. **Met except mail:** the name set is measured and preserved by
-provisioning, the certs are valid and announced, and the references are gone —
-but mail has no path yet, so "mail authenticated" is the one open clause. Two
+stale references. **Met 2026-10-03.** The name set is measured and preserved by
+provisioning, the certs are valid and announced, the references are gone, and the
+signing domain's mail is authenticated — SPF/DKIM/DMARC for `signara.innotel.us`
+and DKIM for the parent, published and read back live. The remaining clause is
+operational, not architectural: outbound relay needs an authenticated submission
+account, and the records were published by hand because the zone refuses
+Stalwart's TSIG updates. Two
 names remain outside this map by construction — the zone root `signara.innotel.us`
 and `sign.innotel.us` serve traffic but are not subdomains of `CERULEAN_BASE_DOMAIN`,
 so `provision.py` cannot express them; they are managed by Cerulean directly.
