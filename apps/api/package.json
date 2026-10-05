@@ -22,7 +22,7 @@
     "@nestjs/platform-express": "^10.4.15",
     "@nestjs/swagger": "^7.4.2",
     "@nestjs/terminus": "^10.2.3",
-    "@nestjs/throttler": "^6.2.0",
+    "@nestjs/throttler": "^6.7.1",
     "@prisma/client": "^5.20.0",
     "acme-client": "^5.4.0",
     "bullmq": "^5.12.0",
