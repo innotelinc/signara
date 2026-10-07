@@ -116,6 +116,17 @@ export default () => ({
   webhooks: {
     allowPrivate: process.env.WEBHOOKS_ALLOW_PRIVATE === 'true',
     timeoutMs: Number(process.env.WEBHOOKS_TIMEOUT_MS ?? 10_000),
+    // An endpoint nothing has been delivered to successfully for this long, and
+    // that has failed at least `autoDisableMinFailures` times since, is disabled
+    // by the health sweep. Without this a dead subscriber is retried forever:
+    // every attempt is 5 queue jobs and a delivery row, for a URL that has been
+    // answering 500 for weeks (issue #85's residual gap).
+    autoDisableAfterDays: Number(process.env.WEBHOOKS_AUTODISABLE_AFTER_DAYS ?? 14),
+    autoDisableMinFailures: Number(process.env.WEBHOOKS_AUTODISABLE_MIN_FAILURES ?? 5),
+    // <= 0 disables the sweep entirely (the manual routes still work).
+    healthSweepIntervalMinutes: Number(
+      process.env.WEBHOOKS_AUTODISABLE_SWEEP_INTERVAL_MINUTES ?? 360,
+    ),
   },
 });
 

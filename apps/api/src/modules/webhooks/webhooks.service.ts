@@ -9,8 +9,9 @@ import { ConfigService } from '@nestjs/config';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { createHmac, randomBytes } from 'node:crypto';
-import { Prisma, WebhookDeliveryStatus } from '@prisma/client';
+import { MembershipRole, Prisma, WebhookDeliveryStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { AuthenticatedUser } from '../../common/types';
 
 /** Event names a tenant can subscribe to. `*` subscribes to all of them. */
@@ -91,6 +92,7 @@ export class WebhooksService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
+    private readonly notifications: NotificationsService,
     @InjectQueue('webhooks') private readonly queue: Queue,
   ) {}
 
@@ -235,6 +237,173 @@ export class WebhooksService {
       createdAt: new Date().toISOString(),
     });
     return { deliveryId: delivery.id, endpointId: endpoint.id, event: 'ping' };
+  }
+
+  /**
+   * Enables or disables one endpoint. The recovery path for the health sweep:
+   * an operator fixes the subscriber, then re-enables it here rather than
+   * re-registering (which would mint a new signing secret and lose the delivery
+   * history that says why it was disabled).
+   */
+  async setActive(user: AuthenticatedUser, id: string, active: boolean) {
+    const orgId = user.org?.id;
+    if (!orgId) throw new ForbiddenException('No active tenant');
+    const endpoint = await this.prisma.webhookEndpoint.findFirst({
+      where: { id, organizationId: orgId },
+    });
+    if (!endpoint) throw new NotFoundException('Webhook endpoint not found');
+
+    return this.prisma.webhookEndpoint.update({
+      where: { id },
+      data: { active, disabledAt: active ? null : new Date() },
+      select: {
+        id: true,
+        url: true,
+        events: true,
+        description: true,
+        active: true,
+        disabledAt: true,
+        createdAt: true,
+      },
+    });
+  }
+
+  /**
+   * Disables endpoints nothing has been delivered to successfully for
+   * `WEBHOOKS_AUTODISABLE_AFTER_DAYS`, once they have failed at least
+   * `WEBHOOKS_AUTODISABLE_MIN_FAILURES` times since. This is the residual gap
+   * the roadmap's integrator row named: deliveries were retried and recorded
+   * forever, but nothing read `WebhookDelivery`, so a subscriber that had been
+   * answering 500 for weeks was still five queue jobs and a delivery row per
+   * event (measured 2026-10-07).
+   *
+   * "Failed for weeks" is measured from the last **successful** delivery, or
+   * from registration when there has never been one — so a brand-new endpoint
+   * with a broken URL is not disabled on its first bad day, and a working
+   * endpoint that goes quiet is disabled only after the full window. The
+   * failure count is a second guard: one blip is not a dead subscriber.
+   *
+   * A disabled endpoint is not deleted: its delivery history is the evidence an
+   * operator needs, and `setActive` turns it back on without a new secret.
+   */
+  async sweepUnhealthyEndpoints(now: Date = new Date()): Promise<{
+    scanned: number;
+    disabled: Array<{
+      id: string;
+      organizationId: string;
+      url: string;
+      failures: number;
+      since: Date;
+      notified: number;
+    }>;
+  }> {
+    const afterDays = this.config.get<number>('webhooks.autoDisableAfterDays') ?? 14;
+    const minFailures = this.config.get<number>('webhooks.autoDisableMinFailures') ?? 5;
+    const windowMs = afterDays * 24 * 60 * 60 * 1000;
+
+    const endpoints = await this.prisma.webhookEndpoint.findMany({
+      where: { active: true },
+      select: { id: true, organizationId: true, url: true, createdAt: true },
+    });
+
+    const disabled: Array<{
+      id: string;
+      organizationId: string;
+      url: string;
+      failures: number;
+      since: Date;
+      notified: number;
+    }> = [];
+
+    for (const endpoint of endpoints) {
+      const lastSuccess = await this.prisma.webhookDelivery.findFirst({
+        where: { endpointId: endpoint.id, status: WebhookDeliveryStatus.DELIVERED },
+        orderBy: { deliveredAt: 'desc' },
+        select: { deliveredAt: true },
+      });
+      const since = lastSuccess?.deliveredAt ?? endpoint.createdAt;
+      if (now.getTime() - since.getTime() < windowMs) continue;
+
+      const failures = await this.prisma.webhookDelivery.count({
+        where: {
+          endpointId: endpoint.id,
+          status: WebhookDeliveryStatus.FAILED,
+          OR: [{ lastAttemptAt: { gt: since } }, { lastAttemptAt: null, createdAt: { gt: since } }],
+        },
+      });
+      if (failures < minFailures) continue;
+
+      await this.prisma.webhookEndpoint.update({
+        where: { id: endpoint.id },
+        data: { active: false, disabledAt: now },
+      });
+      const notified = await this.notifyDisabled(endpoint, failures, since, now);
+      this.logger.warn(
+        `Disabled webhook ${endpoint.id} for ${endpoint.organizationId}: ${failures} failure(s) since ${since.toISOString()}`,
+      );
+      disabled.push({
+        id: endpoint.id,
+        organizationId: endpoint.organizationId,
+        url: endpoint.url,
+        failures,
+        since,
+        notified,
+      });
+    }
+
+    return { scanned: endpoints.length, disabled };
+  }
+
+  /**
+   * Tells the tenant why their endpoint was disabled, so a silent stop does not
+   * look like an outage on our side. Recipients are the people who can act on
+   * it: org owners/admins, and anyone whose role grants `webhooks.manage` —
+   * resolved through the same role/permission graph the guard uses.
+   */
+  private async notifyDisabled(
+    endpoint: { id: string; organizationId: string; url: string },
+    failures: number,
+    since: Date,
+    now: Date,
+  ): Promise<number> {
+    const recipients = await this.prisma.membership.findMany({
+      where: {
+        organizationId: endpoint.organizationId,
+        user: { status: 'ACTIVE', deletedAt: null },
+        OR: [
+          { role: { in: [MembershipRole.OWNER, MembershipRole.ADMIN] } },
+          { roleRef: { permissions: { some: { permission: { code: 'webhooks.manage' } } } } },
+        ],
+      },
+      select: { userId: true },
+    });
+
+    const days = Math.max(1, Math.round((now.getTime() - since.getTime()) / 86_400_000));
+    for (const { userId } of recipients) {
+      await this.notifications.create({
+        userId,
+        organizationId: endpoint.organizationId,
+        type: 'webhook.endpoint_disabled',
+        title: 'Webhook endpoint disabled after repeated failures',
+        body:
+          `${endpoint.url} has not delivered successfully in ${days} day(s) and failed ` +
+          `${failures} time(s) since then, so it was disabled to stop the retries. ` +
+          'Re-enable it from the webhooks settings once the subscriber is fixed.',
+        metadata: {
+          endpointId: endpoint.id,
+          url: endpoint.url,
+          failures,
+          days,
+          disabledAt: now.toISOString(),
+        },
+      });
+    }
+    if (recipients.length === 0) {
+      this.logger.warn(
+        `Disabled webhook ${endpoint.id} but the organization has no owner/admin or webhooks.manage member to notify`,
+      );
+    }
+    return recipients.length;
   }
 
   /**

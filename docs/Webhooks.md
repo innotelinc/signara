@@ -15,6 +15,7 @@ permission, and configured at runtime — no restart.
 | `POST`   | `/webhooks`            | Register an endpoint; **signing secret returned once** |
 | `GET`    | `/webhooks`            | List endpoints (never returns the secret)              |
 | `POST`   | `/webhooks/:id/ping`   | Send a signed `ping` to prove the URL works            |
+| `POST`   | `/webhooks/:id/enable` | Re-enable an endpoint the health sweep disabled        |
 | `DELETE` | `/webhooks/:id`        | Remove the endpoint and its delivery history           |
 | `GET`    | `/webhooks/deliveries` | Recent attempts, optionally `?endpointId=`             |
 
@@ -114,6 +115,31 @@ JSON changes key order and breaks the digest.
 - Send failures never affect the signing flow: if the fan-out or the queue is
   unavailable, the event is logged and the signature is still collected.
 
+## When an endpoint is disabled
+
+A subscriber that has stopped working should not be retried forever: every event
+would be five queue jobs and a delivery row, against a URL that has been
+answering `500` for weeks. A **health sweep** disables such an endpoint and tells
+the tenant why.
+
+- The sweep runs on the `webhooks` queue every
+  `WEBHOOKS_AUTODISABLE_SWEEP_INTERVAL_MINUTES` (6 h by default), as a repeatable
+  job so it survives restarts and cannot double-fire across API replicas.
+- An endpoint is disabled when it has had **no successful delivery for
+  `WEBHOOKS_AUTODISABLE_AFTER_DAYS`** (14 by default) **and has failed at least
+  `WEBHOOKS_AUTODISABLE_MIN_FAILURES` times** (5) since. The window is measured
+  from the last `DELIVERED` delivery, or from registration when there has never
+  been one — so a brand-new endpoint is not disabled on its first bad day, and
+  one blip is not a dead subscriber.
+- Disabling sets `active=false` and `disabledAt`, and creates an in-app
+  notification for the organization's owners/admins and anyone whose role grants
+  `webhooks.manage`. The endpoint is **not deleted** — its delivery history is
+  the evidence — and `POST /webhooks/:id/enable` turns it back on **without
+  minting a new signing secret**.
+- A disabled endpoint is still listed by `GET /webhooks` with `disabledAt` set.
+  Deliveries already queued for it are recorded `FAILED` with `endpoint
+disabled` and are not retried.
+
 ## URL policy (SSRF)
 
 Endpoint URLs are tenant-supplied and the API runs inside the deployment's own
@@ -131,7 +157,10 @@ log, so:
 - Set **`WEBHOOKS_ALLOW_PRIVATE=true`** to allow internal endpoints — intended
   for a subscriber on the same Docker network, where plain `http` is meaningful.
 
-| Variable                 | Default | Meaning                               |
-| ------------------------ | ------- | ------------------------------------- |
-| `WEBHOOKS_ALLOW_PRIVATE` | `false` | Permit private/internal endpoint URLs |
-| `WEBHOOKS_TIMEOUT_MS`    | `10000` | Per-attempt HTTP timeout              |
+| Variable                                      | Default | Meaning                                                 |
+| --------------------------------------------- | ------- | ------------------------------------------------------- |
+| `WEBHOOKS_ALLOW_PRIVATE`                      | `false` | Permit private/internal endpoint URLs                   |
+| `WEBHOOKS_TIMEOUT_MS`                         | `10000` | Per-attempt HTTP timeout                                |
+| `WEBHOOKS_AUTODISABLE_AFTER_DAYS`             | `14`    | No success for this long before an endpoint is disabled |
+| `WEBHOOKS_AUTODISABLE_MIN_FAILURES`           | `5`     | Minimum failures since then before disabling            |
+| `WEBHOOKS_AUTODISABLE_SWEEP_INTERVAL_MINUTES` | `360`   | Sweep interval; `<= 0` disables the sweep               |

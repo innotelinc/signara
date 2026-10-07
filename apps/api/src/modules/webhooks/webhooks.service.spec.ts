@@ -5,6 +5,7 @@ import { BadRequestException } from '@nestjs/common';
 import { WebhookDeliveryStatus } from '@prisma/client';
 import { isPrivateHost, signWebhookPayload, WebhooksService } from './webhooks.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { AuthenticatedUser } from '../../common/types';
 
 describe('WebhooksService', () => {
@@ -15,15 +16,25 @@ describe('WebhooksService', () => {
       create: jest.fn(),
       findMany: jest.fn().mockResolvedValue([]),
       findFirst: jest.fn(),
+      update: jest.fn().mockResolvedValue({}),
       delete: jest.fn(),
     },
     webhookDelivery: {
       create: jest.fn(),
       findUnique: jest.fn(),
+      findFirst: jest.fn(),
       findMany: jest.fn(),
+      count: jest.fn().mockResolvedValue(0),
       update: jest.fn().mockResolvedValue({}),
     },
+    membership: {
+      findMany: jest.fn().mockResolvedValue([]),
+    },
   };
+
+  const notificationsMock = {
+    create: jest.fn().mockResolvedValue(undefined),
+  } as unknown as NotificationsService;
 
   const queueMock = { add: jest.fn().mockResolvedValue(undefined) };
   let configValues: Record<string, unknown> = {};
@@ -43,12 +54,18 @@ describe('WebhooksService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
-    configValues = { 'webhooks.allowPrivate': false, 'webhooks.timeoutMs': 10_000 };
+    configValues = {
+      'webhooks.allowPrivate': false,
+      'webhooks.timeoutMs': 10_000,
+      'webhooks.autoDisableAfterDays': 14,
+      'webhooks.autoDisableMinFailures': 5,
+    };
     const moduleRef = await Test.createTestingModule({
       providers: [
         WebhooksService,
         { provide: PrismaService, useValue: prismaMock },
         { provide: ConfigService, useValue: configMock },
+        { provide: NotificationsService, useValue: notificationsMock },
         { provide: 'BullQueue_webhooks', useValue: queueMock },
       ],
     }).compile();
@@ -221,6 +238,151 @@ describe('WebhooksService', () => {
       expect(await service.emit('request.signed', { organizationId: 'org-1' })).toBe(0);
       expect(prismaMock.webhookDelivery.create).not.toHaveBeenCalled();
       expect(queueMock.add).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('sweepUnhealthyEndpoints', () => {
+    const NOW = new Date('2026-10-07T12:00:00Z');
+    const daysAgo = (n: number) => new Date(NOW.getTime() - n * 24 * 60 * 60 * 1000);
+
+    const endpoint = (overrides: Record<string, unknown> = {}) => ({
+      id: 'wh-old',
+      organizationId: 'org-1',
+      url: 'https://dead.example.com/hook',
+      createdAt: daysAgo(30),
+      ...overrides,
+    });
+
+    it('disables an endpoint that has failed for weeks, and tells the tenant why', async () => {
+      prismaMock.webhookEndpoint.findMany.mockResolvedValue([endpoint()]);
+      prismaMock.webhookDelivery.findFirst.mockResolvedValue(null); // never delivered
+      prismaMock.webhookDelivery.count.mockResolvedValue(9);
+      prismaMock.membership.findMany.mockResolvedValue([{ userId: 'u-1' }, { userId: 'u-2' }]);
+
+      const result = await service.sweepUnhealthyEndpoints(NOW);
+
+      expect(prismaMock.webhookEndpoint.update).toHaveBeenCalledWith({
+        where: { id: 'wh-old' },
+        data: { active: false, disabledAt: NOW },
+      });
+      expect(result.disabled).toEqual([
+        expect.objectContaining({ id: 'wh-old', failures: 9, notified: 2 }),
+      ]);
+      // One notice per actionable member, naming the endpoint and the window.
+      expect(notificationsMock.create).toHaveBeenCalledTimes(2);
+      expect(notificationsMock.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 'u-1',
+          organizationId: 'org-1',
+          type: 'webhook.endpoint_disabled',
+          metadata: expect.objectContaining({ endpointId: 'wh-old', failures: 9, days: 30 }),
+        }),
+      );
+      // Recipients are the people who can act: owners/admins or webhooks.manage.
+      const recipientQuery = prismaMock.membership.findMany.mock.calls[0][0];
+      expect(recipientQuery.where.OR[0]).toMatchObject({ role: { in: ['OWNER', 'ADMIN'] } });
+      expect(JSON.stringify(recipientQuery.where.OR[1])).toContain('webhooks.manage');
+    });
+
+    it('measures from registration when there has never been a success', async () => {
+      prismaMock.webhookEndpoint.findMany.mockResolvedValue([endpoint()]);
+      prismaMock.webhookDelivery.findFirst.mockResolvedValue(null);
+      prismaMock.webhookDelivery.count.mockResolvedValue(5);
+
+      await service.sweepUnhealthyEndpoints(NOW);
+
+      const countQuery = prismaMock.webhookDelivery.count.mock.calls[0][0];
+      // Failures counted since the endpoint existed, not since a success that
+      // never happened.
+      expect(countQuery.where.OR).toEqual(
+        expect.arrayContaining([expect.objectContaining({ lastAttemptAt: null })]),
+      );
+      expect(prismaMock.webhookEndpoint.update).toHaveBeenCalled();
+    });
+
+    it('disables an endpoint that used to work and then went quiet', async () => {
+      prismaMock.webhookEndpoint.findMany.mockResolvedValue([endpoint()]);
+      prismaMock.webhookDelivery.findFirst.mockResolvedValue({ deliveredAt: daysAgo(21) });
+      prismaMock.webhookDelivery.count.mockResolvedValue(12);
+
+      await service.sweepUnhealthyEndpoints(NOW);
+
+      expect(prismaMock.webhookEndpoint.update).toHaveBeenCalledWith({
+        where: { id: 'wh-old' },
+        data: { active: false, disabledAt: NOW },
+      });
+    });
+
+    it('leaves a recently successful endpoint alone', async () => {
+      prismaMock.webhookEndpoint.findMany.mockResolvedValue([endpoint()]);
+      prismaMock.webhookDelivery.findFirst.mockResolvedValue({ deliveredAt: daysAgo(1) });
+
+      const result = await service.sweepUnhealthyEndpoints(NOW);
+
+      expect(result.disabled).toEqual([]);
+      expect(prismaMock.webhookDelivery.count).not.toHaveBeenCalled();
+      expect(prismaMock.webhookEndpoint.update).not.toHaveBeenCalled();
+    });
+
+    it('does not disable a new endpoint on its first bad day', async () => {
+      prismaMock.webhookEndpoint.findMany.mockResolvedValue([
+        endpoint({ id: 'wh-new', createdAt: daysAgo(2) }),
+      ]);
+      prismaMock.webhookDelivery.findFirst.mockResolvedValue(null);
+      prismaMock.webhookDelivery.count.mockResolvedValue(50);
+
+      const result = await service.sweepUnhealthyEndpoints(NOW);
+
+      expect(result.disabled).toEqual([]);
+      expect(prismaMock.webhookEndpoint.update).not.toHaveBeenCalled();
+    });
+
+    it('does not disable on a single blip — the failure count is a second guard', async () => {
+      prismaMock.webhookEndpoint.findMany.mockResolvedValue([endpoint()]);
+      prismaMock.webhookDelivery.findFirst.mockResolvedValue(null);
+      prismaMock.webhookDelivery.count.mockResolvedValue(2); // below the minimum of 5
+
+      const result = await service.sweepUnhealthyEndpoints(NOW);
+
+      expect(result.disabled).toEqual([]);
+      expect(prismaMock.webhookEndpoint.update).not.toHaveBeenCalled();
+      expect(notificationsMock.create).not.toHaveBeenCalled();
+    });
+
+    it('logs but still disables when the organization has nobody to notify', async () => {
+      prismaMock.webhookEndpoint.findMany.mockResolvedValue([endpoint()]);
+      prismaMock.webhookDelivery.findFirst.mockResolvedValue(null);
+      prismaMock.webhookDelivery.count.mockResolvedValue(9);
+      prismaMock.membership.findMany.mockResolvedValue([]);
+
+      const result = await service.sweepUnhealthyEndpoints(NOW);
+
+      expect(result.disabled[0]).toMatchObject({ id: 'wh-old', notified: 0 });
+      expect(notificationsMock.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('setActive', () => {
+    it('re-enables an endpoint without minting a new secret', async () => {
+      prismaMock.webhookEndpoint.findFirst.mockResolvedValue({ id: 'wh-1' });
+      prismaMock.webhookEndpoint.update.mockResolvedValue({ id: 'wh-1', active: true });
+
+      await service.setActive(user, 'wh-1', true);
+
+      expect(prismaMock.webhookEndpoint.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'wh-1' },
+          data: { active: true, disabledAt: null },
+        }),
+      );
+    });
+
+    it('refuses an endpoint that belongs to another tenant', async () => {
+      prismaMock.webhookEndpoint.findFirst.mockResolvedValue(null);
+      await expect(service.setActive(user, 'wh-other', true)).rejects.toThrow(
+        'Webhook endpoint not found',
+      );
+      expect(prismaMock.webhookEndpoint.update).not.toHaveBeenCalled();
     });
   });
 

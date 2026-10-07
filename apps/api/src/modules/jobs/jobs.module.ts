@@ -3,6 +3,7 @@ import { NotificationProcessor } from './notification.processor';
 import { SigningProcessor } from './signing.processor';
 import { WebhookProcessor } from './webhook.processor';
 import { ReminderSchedulerService } from './reminder-scheduler.service';
+import { WebhookHealthSchedulerService } from './webhook-health-scheduler.service';
 import { QueueMetricsService } from './queue-metrics.service';
 import { MailerModule } from '../mailer/mailer.module';
 import { SignaturesModule } from '../signatures/signatures.module';
@@ -22,6 +23,7 @@ import { WebhooksModule } from '../webhooks/webhooks.module';
     SigningProcessor,
     WebhookProcessor,
     ReminderSchedulerService,
+    WebhookHealthSchedulerService,
     QueueMetricsService,
   ],
 })

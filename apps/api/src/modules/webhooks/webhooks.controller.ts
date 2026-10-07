@@ -49,6 +49,15 @@ export class WebhooksController {
     return this.webhooks.ping(user, id);
   }
 
+  @Post(':id/enable')
+  @Permissions('webhooks.manage')
+  @ApiOperation({
+    summary: 'Re-enable an endpoint the health sweep (or an operator) disabled',
+  })
+  enable(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.webhooks.setActive(user, id, true);
+  }
+
   @Delete(':id')
   @Permissions('webhooks.manage')
   @ApiOperation({ summary: 'Remove a webhook endpoint and its delivery history' })
