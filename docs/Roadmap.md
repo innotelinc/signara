@@ -324,7 +324,7 @@ what is owed to users in place of the history.
       (`innotel-platform-stack` `docs/container-placement.md`): the zone refuses
       Stalwart's TSIG dynamic updates, so these records were published by hand and
       the keys activated manually — a rotation needs the same hand; and Stalwart
-      still refuses to *relay* unauthenticated mail, so customer-facing mail needs
+      still refuses to _relay_ unauthenticated mail, so customer-facing mail needs
       an authenticated submission account before it leaves the estate.
 - [x] Re-point anything still describing "sign-platform" in docs/comments — **done
       2026-09-19**: an estate-wide audit found no live references outside the
@@ -378,32 +378,32 @@ so `provision.py` cannot express them; they are managed by Cerulean directly.
       restore path is exercised between operator drills rather than only when someone
       remembers to run it.
 - [x] Monitoring on the api/web/queue — **closed 2026-10-02: Prometheus and
-  Alertmanager run on the host and now deliver.** All three scrape targets are
-  up (`signara-api`, `signara-backup`, `prometheus`) and the rules evaluate: the
-  only alert firing is `BackupIsLocalOnly`, which is the correct reading, not a
-  false positive. Starting it exposed two defects, both fixed: the MinIO scrape
-  job could only ever be down (the store is retired and profile-gated), so
-  `StorageEndpointDown` was a permanent false critical; and `alertmanager.yml`
-  used `${SMTP_PASSWORD}` against `smtp.example.com`, which Alertmanager cannot
-  expand — `amtool check-config` reported SUCCESS on it while the receiver sent
-  nowhere. The config is now rendered from `.env` at container start.
-  **Closed 2026-10-02 — the in-house mail server became the destination.** The
-  estate stood up its own Stalwart on `192.168.1.15` (the same server the other
-  stacks relay through), so `.env` now has `SMTP_HOST=192.168.1.15`,
-  `SMTP_PORT=25` and `ALERT_EMAIL_TO=admin@innotel.us`. Waking it surfaced two
-  defects the roadmap had not named, each a connection that succeeds and
-  delivers nothing. First, Alertmanager speaks `EHLO` with the container
-  hostname, which Go defaults to `localhost`, and Stalwart refuses a single-label
-  name (`550 5.5.0 Invalid EHLO domain`); fixed by a new `SMTP_HELLO` setting
-  (rendered by the entrypoint, default `signara.innotel.us`) on the receiver's
-  `hello:`. Second, Stalwart offers `STARTTLS` with a **self-signed** certificate
-  that names no address (`rcgen self signed cert`, SAN `localhost`), so
-  Alertmanager refuses to send (`x509: cannot validate certificate for
-  192.168.1.15`); fixed by a new `SMTP_TLS_INSECURE` setting (default false) on
-  the receiver's `tls_config.insecure_skip_verify`, which keeps `STARTTLS` and
-  skips verification only where the operator asks. Verified by injecting alerts
-  through the v2 API and reading the dispatched notification in the container
-  log.
+      Alertmanager run on the host and now deliver.** All three scrape targets are
+      up (`signara-api`, `signara-backup`, `prometheus`) and the rules evaluate: the
+      only alert firing is `BackupIsLocalOnly`, which is the correct reading, not a
+      false positive. Starting it exposed two defects, both fixed: the MinIO scrape
+      job could only ever be down (the store is retired and profile-gated), so
+      `StorageEndpointDown` was a permanent false critical; and `alertmanager.yml`
+      used `${SMTP_PASSWORD}` against `smtp.example.com`, which Alertmanager cannot
+      expand — `amtool check-config` reported SUCCESS on it while the receiver sent
+      nowhere. The config is now rendered from `.env` at container start.
+      **Closed 2026-10-02 — the in-house mail server became the destination.** The
+      estate stood up its own Stalwart on `192.168.1.15` (the same server the other
+      stacks relay through), so `.env` now has `SMTP_HOST=192.168.1.15`,
+      `SMTP_PORT=25` and `ALERT_EMAIL_TO=admin@innotel.us`. Waking it surfaced two
+      defects the roadmap had not named, each a connection that succeeds and
+      delivers nothing. First, Alertmanager speaks `EHLO` with the container
+      hostname, which Go defaults to `localhost`, and Stalwart refuses a single-label
+      name (`550 5.5.0 Invalid EHLO domain`); fixed by a new `SMTP_HELLO` setting
+      (rendered by the entrypoint, default `signara.innotel.us`) on the receiver's
+      `hello:`. Second, Stalwart offers `STARTTLS` with a **self-signed** certificate
+      that names no address (`rcgen self signed cert`, SAN `localhost`), so
+      Alertmanager refuses to send (`x509: cannot validate certificate for
+192.168.1.15`); fixed by a new `SMTP_TLS_INSECURE` setting (default false) on
+      the receiver's `tls_config.insecure_skip_verify`, which keeps `STARTTLS` and
+      skips verification only where the operator asks. Verified by injecting alerts
+      through the v2 API and reading the dispatched notification in the container
+      log.
 - [x] **An upgrade path written down** — `docs/Deployment.md` §6 (2026-09-20).
       Its original reading was **wrong and has been corrected**: the deployment did
       run registry images (both containers carried `RepoDigests` into images CI
@@ -568,6 +568,36 @@ that is a different host, and a restore drill that has actually been run.
    SMS/WhatsApp, i18n: ship or explicitly out of scope? (In-person signing was
    answered on 2026-09-21 — shipped; see W2.)
 3. **Billing:** Signara's module as a Magnate client, or removed?
+
+### Recommendations for the owner (2026-10-07)
+
+Each "decide" row needs an **owner's** answer, not a default. These are the
+recommendations put to the tracker (issues #86/#89/#90/#92), with the reason, so
+the decision is a yes/no rather than an open question:
+
+- **Bulk send (#86) — recommend out of scope for v1.** The per-recipient flow
+  already exists and no tenant has asked; a batch is a per-recipient fan-out
+  _plus_ a batch view so a partial batch is legible, which is real work. Reopen
+  on the first tenant that runs one document to many recipients repeatedly.
+- **Cloud-storage import (#89) — recommend out of scope.** Storage is our own
+  object store, so each provider is a _source_, and each source is an OAuth
+  client, a token store and a data-egress question for a convenience that
+  download-then-upload already covers.
+- **SMS / WhatsApp (#90) — recommend email-only, stated.** Email is the
+  supported channel; say so in the UserGuide rather than leaving it implicit,
+  and treat a signer without email as a support path. A messaging provider
+  adds cost and consent handling for a channel email already covers.
+- **Billing (#92) — recommend Signara meters, Magnate bills.** Keep
+  `billing`'s usage/plan read for enforcement, and make Magnate the revenue
+  owner and the source of invoices/subscriptions; remove the second invoicing
+  path rather than run two sources of truth for what a customer owes.
+- **i18n (#91) — the premise is stale.** The seven locale catalogs shipped
+  2026-09-20 (they exist and are wired); what remains is extracting the strings
+  for screens newer than the harvested catalogs, as those screens are touched.
+  Not a decision, a working note — see W2.
+- **Templates (#81) — landed 2026-09-21.** The field-placement work is done
+  (editor, hydration, evidence); the one deliberate exception is `ATTACHMENT`,
+  which is refused at send with a reason rather than faked. Close the issue.
 
 ---
 
