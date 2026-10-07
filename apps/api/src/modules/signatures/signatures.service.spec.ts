@@ -799,4 +799,68 @@ describe('SignaturesService', () => {
       });
     });
   });
+
+  describe('evidenceReport', () => {
+    it('carries the header and per-signer fields the old certificate drew (#84)', async () => {
+      prismaMock.signingRequest.findFirst.mockResolvedValue({
+        id: 'req-1',
+        organizationId: 'org-1',
+        mode: SigningMode.SEQUENTIAL,
+        status: DocumentStatus.COMPLETED,
+        createdAt: new Date('2026-09-01T00:00:00Z'),
+        completedAt: new Date('2026-09-02T00:00:00Z'),
+        documentId: 'doc-1',
+        document: {
+          id: 'doc-1',
+          title: 'NDA',
+          fileName: 'nda.pdf',
+          checksumSha256: 'abc123',
+        },
+        createdBy: { displayName: 'Dana Originator', email: 'dana@signara.local' },
+        signers: [
+          {
+            id: 'sgn-1',
+            email: 'ada@signara.local',
+            name: 'Ada',
+            role: SignerRole.SIGNER,
+            status: SignerStatus.SIGNED,
+            viewedAt: new Date('2026-09-01T10:00:00Z'),
+            signedAt: new Date('2026-09-01T11:00:00Z'),
+            authMethod: 'EMAIL_OTP',
+            signatures: [
+              { id: 'sig-1', ipAddress: '203.0.113.5', signedAt: new Date('2026-09-01T11:00:00Z') },
+            ],
+          },
+          // A CC is not a signer and must not be counted.
+          {
+            id: 'sgn-2',
+            email: 'cc@signara.local',
+            name: 'CC',
+            role: SignerRole.CC,
+            signatures: [],
+          },
+        ],
+        events: [],
+        fields: [],
+      });
+
+      const report = await service.evidenceReport(user, 'req-1');
+
+      expect(report.summary).toMatchObject({
+        completedAt: new Date('2026-09-02T00:00:00Z'),
+        signerCount: 1,
+        originator: { name: 'Dana Originator', email: 'dana@signara.local' },
+        documentHash: 'abc123',
+      });
+      // "Viewed on" — the field the old page showed and the report used to drop.
+      expect(report.envelope.signers[0]).toMatchObject({
+        viewedAt: new Date('2026-09-01T10:00:00Z'),
+        signedAt: new Date('2026-09-01T11:00:00Z'),
+        authMethod: 'EMAIL_OTP',
+      });
+      expect(report.envelope.signers[0].signatures[0]).toMatchObject({
+        ipAddress: '203.0.113.5',
+      });
+    });
+  });
 });

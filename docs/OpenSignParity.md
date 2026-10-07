@@ -221,6 +221,49 @@ Two things worth carrying explicitly:
   signature image. A Signara evidence rendering that omits any of those is a
   visible regression for anyone comparing the two.
 
+### What Signara renders, and the accepted differences (#84, 2026-10-07)
+
+Signara has **no PDF certificate renderer**. The artefact is the structured
+**evidence report** — `GET /signatures/requests/:id/evidence`
+(`SignaturesService.evidenceReport`) — plus the PKI `certificates` module
+(`provision`/`verify`/`revoke`) for a certificate-backed signature. The exit for
+#84 is _"either the layouts match, or the difference is documented as accepted"_;
+this is the documented difference.
+
+Field-by-field, against the old page above:
+
+| Old certificate field            | In the Signara evidence report                                      |
+| -------------------------------- | ------------------------------------------------------------------- |
+| `Document Id` / `Document Name`  | `document.id` / `document.title`                                    |
+| `Document hash (sha256)`         | `summary.documentHash` = `document.checksumSha256`                  |
+| `Organization`                   | the request's `organizationId` (tenant scope of the route)          |
+| `Created on` / `Completed on`    | `summary.createdAt` / `summary.completedAt` **(added 2026-10-07)**  |
+| `Signers : count`                | `summary.signerCount` (excludes CC) **(added 2026-10-07)**          |
+| `Document originator` name/email | `summary.originator` **(added 2026-10-07)**                         |
+| per signer `Name` / `Email`      | `envelope.signers[].name` / `.email`                                |
+| per signer `Security level`      | `signatures[].identityAssurance` + `signer.authMethod`              |
+| per signer `Viewed on`           | `envelope.signers[].viewedAt` **(added 2026-10-07)**                |
+| per signer `Signed on`           | `envelope.signers[].signedAt` / `signatures[].signedAt`             |
+| per signer `IP address`          | `signatures[].ipAddress`                                            |
+| per signer `Signature :` image   | `signatures[].signatureValue` (+ `certificateSerial`, `signedHash`) |
+
+**Differences accepted, with the reason:**
+
+- **No drawn PDF page** — no Times typography, no `Generated On` stamp, no
+  border. The old page was a rendering; Signara keeps the _data_ and renders it
+  on demand. A verifier gets the same fields, in a form a machine can check.
+- **The originator's IP address is not carried.** The old page recorded it; in
+  Signara the originator acts in the authenticated app rather than through a
+  signing session, so there is no request IP to bind to _that act_ the way a
+  signer's `ipAddress` binds to a signature. Recorded here rather than invented.
+- **The signer's signature is bytes, not a picture.** `signatureValue` is the
+  signed value and `certificateSerial`/`signedHash` tie it to the PKI
+  certificate; the old page drew the image. Storage, not a regression.
+
+Before this pass the report was also missing the request timestamps, the signer
+count, the originator and `viewedAt` — all four were added above, so the report
+is now a superset of the old page's _information_, differing only in form.
+
 ## 4. Carried, and not carried
 
 | Asset                                                    | Verdict                                                                                                                             |

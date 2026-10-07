@@ -775,6 +775,7 @@ export class SignaturesService {
         events: { orderBy: { createdAt: 'asc' } },
         signatures: true,
         fields: { orderBy: [{ pageNumber: 'asc' }, { createdAt: 'asc' }] },
+        createdBy: { select: { displayName: true, email: true } },
       },
     });
     if (!request) throw new NotFoundException('Signing request not found');
@@ -786,12 +787,28 @@ export class SignaturesService {
       document: request.document,
       mode: request.mode,
       status: request.status,
+      // The header fields the retired platform's "Certificate of Completion"
+      // drew, so a verifier comparing the two is not missing one: the request's
+      // own timestamps, who originated it, the signer count, and the
+      // tamper-evidence anchor (issues #84, docs/OpenSignParity.md §3).
+      summary: {
+        createdAt: request.createdAt,
+        completedAt: request.completedAt,
+        signerCount: request.signers.filter((s) => s.role !== SignerRole.CC).length,
+        originator: request.createdBy
+          ? { name: request.createdBy.displayName, email: request.createdBy.email }
+          : null,
+        documentHash: request.document.checksumSha256,
+      },
       envelope: {
         signers: request.signers.map((s) => ({
           email: s.email,
           name: s.name,
           role: s.role,
           status: s.status,
+          // "Viewed on" on the old certificate — present on the signer row but
+          // dropped by the report until now.
+          viewedAt: s.viewedAt,
           signedAt: s.signedAt,
           authMethod: s.authMethod,
           // The placed fields this signer filled, with their values — the half of
