@@ -1,13 +1,20 @@
 import { Test } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { EmailService } from './mailer.service';
+import { BrandingService } from '../branding/branding.service';
+import { PLATFORM_BRANDING } from '../branding/branding';
 
 describe('EmailService', () => {
+  const brandingMock = {
+    forOrganization: jest.fn().mockResolvedValue(PLATFORM_BRANDING),
+  } as unknown as BrandingService;
+
   function build(config: Record<string, unknown>) {
     return Test.createTestingModule({
       providers: [
         EmailService,
         { provide: ConfigService, useValue: { get: (k: string) => config[k] ?? undefined } },
+        { provide: BrandingService, useValue: brandingMock },
       ],
     }).compile();
   }
@@ -83,6 +90,32 @@ describe('EmailService', () => {
     expect(html).not.toContain('<script>alert(1)</script>');
     expect(html).toContain('https://app.signara.innotel.us/documents/doc-1');
     expect(html).toContain('Hi Dana,');
+  });
+
+  it('renders a tenant logo and name when the organization has branding (#87)', async () => {
+    const { renderInviteEmail } = await import('./email-templates');
+    const { html } = renderInviteEmail(
+      {
+        kind: 'invite',
+        signerEmail: 'signer@signara.local',
+        documentTitle: 'NDA',
+        signUrl: 'https://app.signara.innotel.us/sign/sgn_abc',
+      },
+      {
+        ...PLATFORM_BRANDING,
+        displayName: 'Acme Legal',
+        tagline: 'Contracts',
+        logoUrl: 'https://cdn.acme.test/logo.png',
+        primaryColor: '#8A2BE2',
+        footerNote: 'Acme Legal — confidential.',
+      },
+    );
+    expect(html).toContain('Acme Legal');
+    expect(html).toContain('https://cdn.acme.test/logo.png');
+    expect(html).toContain('background-color:#8A2BE2');
+    expect(html).toContain('Acme Legal — confidential.');
+    // The platform identity is not what a branded tenant's signer sees.
+    expect(html).not.toContain('Secure Every Signature');
   });
 
   it('sends the completion mail From the deployment identity, not a per-tenant one', async () => {

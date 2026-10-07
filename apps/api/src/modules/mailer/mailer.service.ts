@@ -2,6 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
 import type { Transporter } from 'nodemailer';
+import { BrandingService } from '../branding/branding.service';
+import { Branding, PLATFORM_BRANDING } from '../branding/branding';
 import {
   renderInviteEmail,
   renderReminderEmail,
@@ -27,6 +29,8 @@ export interface CompletionMailContext {
   documentTitle: string;
   /** Where the originator downloads the signed PDF (the web document page). */
   documentUrl: string;
+  /** Resolves the tenant's branding; absent means the platform identity. */
+  organizationId?: string | null;
 }
 
 export interface SigningMailContext {
@@ -39,6 +43,8 @@ export interface SigningMailContext {
   signUrl: string;
   /** 'invite' | 'reminder' */
   kind: 'invite' | 'reminder';
+  /** Resolves the tenant's branding; absent means the platform identity. */
+  organizationId?: string | null;
 }
 
 /**
@@ -56,7 +62,10 @@ export class EmailService {
   private readonly logger = new Logger(EmailService.name);
   private transporter: Transporter | null = null;
 
-  constructor(private readonly config: ConfigService) {}
+  constructor(
+    private readonly config: ConfigService,
+    private readonly branding: BrandingService,
+  ) {}
 
   isConfigured(): boolean {
     return Boolean(this.config.get<string>('smtp.host'));
@@ -66,11 +75,12 @@ export class EmailService {
     return this.config.get<string>('smtp.from') ?? 'Signara <no-reply@signara.innotel.us>';
   }
 
-  /** Sends a signing invitation or reminder with the branded template. */
+  /** Sends a signing invitation or reminder with the tenant's branding. */
   async sendSigningMail(ctx: SigningMailContext): Promise<boolean> {
     const { kind } = ctx;
+    const branding = await this.resolveBranding(ctx.organizationId);
     const { html, text, subject } =
-      kind === 'reminder' ? renderReminderEmail(ctx) : renderInviteEmail(ctx);
+      kind === 'reminder' ? renderReminderEmail(ctx, branding) : renderInviteEmail(ctx, branding);
     return this.send({ to: ctx.signerEmail, subject, html, text });
   }
 
@@ -81,7 +91,8 @@ export class EmailService {
    * what keeps SPF/DKIM/DMARC aligned and the mail out of spam.
    */
   async sendCompletionMail(ctx: CompletionMailContext): Promise<boolean> {
-    const { html, text, subject } = renderCompletionEmail(ctx);
+    const branding = await this.resolveBranding(ctx.organizationId);
+    const { html, text, subject } = renderCompletionEmail(ctx, branding);
     return this.send({ to: ctx.senderEmail, subject, html, text });
   }
 
@@ -93,6 +104,22 @@ export class EmailService {
   }): Promise<boolean> {
     const { html, text, subject } = renderNotificationEmail(input.title, input.body ?? '');
     return this.send({ to: input.to, subject, html, text });
+  }
+
+  /**
+   * Branding is a best-effort lookup: a missing tenant must not stop a signing
+   * mail, so a failure here falls back to the platform identity rather than
+   * throwing into the queue worker (issue #87).
+   */
+  private async resolveBranding(organizationId?: string | null): Promise<Branding> {
+    try {
+      return await this.branding.forOrganization(organizationId);
+    } catch (err) {
+      this.logger.warn(
+        `could not resolve branding for ${organizationId ?? 'the platform'}: ${(err as Error).message}`,
+      );
+      return PLATFORM_BRANDING;
+    }
   }
 
   async send(message: MailMessage): Promise<boolean> {

@@ -13,6 +13,8 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { MinioService } from '../../storage/minio.service';
 import { CertificatesService } from '../certificates/certificates.service';
 import { WebhooksService } from '../webhooks/webhooks.service';
+import { BrandingService } from '../branding/branding.service';
+import { PLATFORM_BRANDING } from '../branding/branding';
 import { Queue } from 'bullmq';
 
 describe('SignaturesService', () => {
@@ -90,6 +92,10 @@ describe('SignaturesService', () => {
         { provide: ConfigService, useValue: configMock },
         { provide: 'BullQueue_signing', useValue: queueMock },
         { provide: WebhooksService, useValue: webhooksMock },
+        {
+          provide: BrandingService,
+          useValue: { forOrganization: jest.fn().mockResolvedValue(PLATFORM_BRANDING) },
+        },
       ],
     }).compile();
 

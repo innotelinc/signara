@@ -181,3 +181,42 @@ curl -X PATCH -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/js
 - [ ] Enable bucket versioning + SSE on MinIO
 - [ ] Enforce MFA in Authentik for all flows
 - [ ] Review audit-log retention and export cadence
+
+## 11. Per-tenant branding (issue #87)
+
+One deployment can serve more than one organization, and each organization's
+signers should see the organization they are dealing with — not the platform.
+Branding is stored on `Organization.branding` (free-form JSON) and set with
+
+```bash
+curl -X PATCH -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"branding":{"displayName":"Acme Legal","tagline":"Contracts",
+        "logoUrl":"https://cdn.acme.test/logo.png","primaryColor":"#8A2BE2",
+        "footerNote":"Acme Legal — confidential."}}' \
+  /api/v1/organizations/current
+```
+
+| Field          | Used in                                    | Fallback when unset         |
+| -------------- | ------------------------------------------ | --------------------------- |
+| `displayName`  | mail header, signing page, evidence report | the org name, then platform |
+| `tagline`      | mail header                                | hidden                      |
+| `logoUrl`      | mail header, signing page                  | no logo                     |
+| `primaryColor` | mail header and button; must be a hex      | platform blue `#0F62FE`     |
+| `footerNote`   | the footer of every mail                   | the platform footer line    |
+
+Where it shows up:
+
+- **Email** — invitation, reminder and completion mail render the header, button
+  colour and footer from the tenant's branding (`BrandingService.forOrganization`
+  resolved in `EmailService`). The **`From` address never changes**: it stays the
+  deployment's `SMTP_FROM` so SPF/DKIM/DMARC keep aligning (see #83).
+- **The signing page** — `GET /signatures/public/:token` returns a `branding`
+  object; the page renders the logo, name and tagline above the document.
+- **The evidence report** — a `branding` object rides with the report, so a
+  certificate names the tenant that issued it.
+
+An organization that sets **no** branding at all gets the platform identity
+exactly as it was before this existed; one that sets a branding object has each
+field it left out filled in as the table says. A logo
+must be an absolute `http(s)` URL (a `data:`/`javascript:` URL is refused), and
+`primaryColor` must be a hex value — free text never reaches a style block.

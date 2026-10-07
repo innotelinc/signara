@@ -27,6 +27,16 @@ interface SigningSession {
    * belongs to one signer by order, and the API never returns another's.
    */
   requestedFields: RequestField[];
+  /**
+   * The sending organization's identity (issue #87), or null/absent when it has
+   * none — in which case the platform identity is used.
+   */
+  branding?: {
+    displayName: string;
+    tagline: string;
+    logoUrl: string | null;
+    primaryColor: string;
+  } | null;
 }
 
 const SIGNATURE_LIKE: RequestField['type'][] = ['SIGNATURE', 'INITIAL'];
@@ -36,7 +46,9 @@ function label(field: RequestField): string {
 }
 
 function isEmpty(value: unknown): boolean {
-  return value === undefined || value === null || (typeof value === 'string' && value.trim() === '');
+  return (
+    value === undefined || value === null || (typeof value === 'string' && value.trim() === '')
+  );
 }
 
 /** Options can arrive as a bare list or wrapped; both shapes are in the wild. */
@@ -246,126 +258,147 @@ export function SigningRoom({ token }: { token: string }) {
     );
   }
 
+  const brand = session.branding;
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-10">
-      <Card className="w-full max-w-lg">
-        <CardHeader>
-          <div className="flex items-center gap-3">
-            <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary-50">
-              <FileText className="h-5 w-5 text-primary-600" />
-            </span>
-            <div>
-              <CardTitle>{session.title}</CardTitle>
-              <p className="text-xs text-slate-500">
-                For {session.signer.name ?? session.signer.email} · {session.signer.role}
-              </p>
-            </div>
+      <div className="w-full max-w-lg">
+        {brand && (
+          <div className="mb-4 flex items-center justify-center gap-2">
+            {brand.logoUrl && (
+              // A tenant logo is an arbitrary remote URL, so next/image's static
+              // allow-list cannot cover it; a plain img is the honest choice.
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={brand.logoUrl}
+                alt=""
+                referrerPolicy="no-referrer"
+                className="h-7 w-7 rounded object-contain"
+              />
+            )}
+            <span className="text-lg font-semibold text-slate-700">{brand.displayName}</span>
+            {brand.tagline && <span className="text-xs text-slate-400">{brand.tagline}</span>}
           </div>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {session.signer.status === 'SIGNED' ? (
-            <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-              You have already signed this document.
-            </div>
-          ) : (
-            <>
-              {session.allowsSigning ? null : (
-                <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
-                  This request is in sequential order — you can review, but signing unlocks once it
-                  is your turn.
-                </div>
-              )}
-              {session.message && (
-                <blockquote className="rounded-lg border-l-4 border-primary-500 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-                  {session.message}
-                </blockquote>
-              )}
-              {session.deadline && (
+        )}
+        <Card className="w-full">
+          <CardHeader>
+            <div className="flex items-center gap-3">
+              <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary-50">
+                <FileText className="h-5 w-5 text-primary-600" />
+              </span>
+              <div>
+                <CardTitle>{session.title}</CardTitle>
                 <p className="text-xs text-slate-500">
-                  Deadline: {new Date(session.deadline).toLocaleString()}
+                  For {session.signer.name ?? session.signer.email} · {session.signer.role}
                 </p>
-              )}
-              <div className="flex items-center justify-between rounded-lg border border-slate-200 px-4 py-3">
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium">{session.document.fileName}</p>
-                  <p className="text-xs text-slate-500">PDF · securely stored by the sender</p>
-                </div>
-                <a
-                  href={session.document.downloadUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="btn-outline"
-                >
-                  View
-                </a>
               </div>
-
-              {fields.length > 0 && (
-                <div className="space-y-3 rounded-lg border border-slate-200 px-4 py-4">
-                  <div className="flex items-center gap-2">
-                    <PenLine className="h-4 w-4 text-primary-600" />
-                    <p className="text-sm font-medium">Complete these fields</p>
-                    <Badge tone={canSign ? 'green' : 'amber'}>
-                      {fields.length - missing.length}/{fields.length}
-                    </Badge>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {session.signer.status === 'SIGNED' ? (
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+                You have already signed this document.
+              </div>
+            ) : (
+              <>
+                {session.allowsSigning ? null : (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+                    This request is in sequential order — you can review, but signing unlocks once
+                    it is your turn.
                   </div>
-                  {fields.map((field) => (
-                    <div key={field.id} className="space-y-1">
-                      {field.type !== 'CHECKBOX' && (
-                        <label className="label" htmlFor={`field-${field.id}`}>
-                          {label(field)}
-                          {field.isRequired && <span className="ml-1 text-red-500">*</span>}
-                          <span className="ml-1 text-xs font-normal text-slate-400">
-                            page {field.pageNumber}
-                          </span>
-                        </label>
-                      )}
-                      <FieldInput
-                        field={field}
-                        value={values[field.id]}
-                        disabled={!session.allowsSigning || action !== null}
-                        onChange={(value) =>
-                          setValues((prev) => ({ ...prev, [field.id]: value }))
-                        }
-                      />
-                    </div>
-                  ))}
-                  {missing.length > 0 && (
-                    <p className="text-xs text-amber-700">
-                      Still required: {missing.map(label).join(', ')}
-                    </p>
-                  )}
+                )}
+                {session.message && (
+                  <blockquote className="rounded-lg border-l-4 border-primary-500 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                    {session.message}
+                  </blockquote>
+                )}
+                {session.deadline && (
+                  <p className="text-xs text-slate-500">
+                    Deadline: {new Date(session.deadline).toLocaleString()}
+                  </p>
+                )}
+                <div className="flex items-center justify-between rounded-lg border border-slate-200 px-4 py-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium">{session.document.fileName}</p>
+                    <p className="text-xs text-slate-500">PDF · securely stored by the sender</p>
+                  </div>
+                  <a
+                    href={session.document.downloadUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="btn-outline"
+                  >
+                    View
+                  </a>
                 </div>
-              )}
 
-              {error && <p className="text-sm text-red-600">{error}</p>}
+                {fields.length > 0 && (
+                  <div className="space-y-3 rounded-lg border border-slate-200 px-4 py-4">
+                    <div className="flex items-center gap-2">
+                      <PenLine className="h-4 w-4 text-primary-600" />
+                      <p className="text-sm font-medium">Complete these fields</p>
+                      <Badge tone={canSign ? 'green' : 'amber'}>
+                        {fields.length - missing.length}/{fields.length}
+                      </Badge>
+                    </div>
+                    {fields.map((field) => (
+                      <div key={field.id} className="space-y-1">
+                        {field.type !== 'CHECKBOX' && (
+                          <label className="label" htmlFor={`field-${field.id}`}>
+                            {label(field)}
+                            {field.isRequired && <span className="ml-1 text-red-500">*</span>}
+                            <span className="ml-1 text-xs font-normal text-slate-400">
+                              page {field.pageNumber}
+                            </span>
+                          </label>
+                        )}
+                        <FieldInput
+                          field={field}
+                          value={values[field.id]}
+                          disabled={!session.allowsSigning || action !== null}
+                          onChange={(value) =>
+                            setValues((prev) => ({ ...prev, [field.id]: value }))
+                          }
+                        />
+                      </div>
+                    ))}
+                    {missing.length > 0 && (
+                      <p className="text-xs text-amber-700">
+                        Still required: {missing.map(label).join(', ')}
+                      </p>
+                    )}
+                  </div>
+                )}
 
-              <div className="flex items-center justify-between gap-3 pt-2">
-                <Button
-                  variant="danger"
-                  onClick={decline}
-                  loading={action === 'decline'}
-                  disabled={action === 'sign'}
-                >
-                  Decline
-                </Button>
-                <Button
-                  onClick={sign}
-                  loading={action === 'sign'}
-                  disabled={action === 'decline' || !session.allowsSigning || !canSign}
-                >
-                  Sign document
-                </Button>
-              </div>
-            </>
-          )}
-          <div className="flex items-center gap-2 pt-2 text-xs text-slate-400">
-            <ShieldCheck className="h-4 w-4" />
-            Your IP address, timestamp, browser, and the values you complete are recorded to the
-            audit trail. Powered by Signara.
-          </div>
-        </CardContent>
-      </Card>
+                {error && <p className="text-sm text-red-600">{error}</p>}
+
+                <div className="flex items-center justify-between gap-3 pt-2">
+                  <Button
+                    variant="danger"
+                    onClick={decline}
+                    loading={action === 'decline'}
+                    disabled={action === 'sign'}
+                  >
+                    Decline
+                  </Button>
+                  <Button
+                    onClick={sign}
+                    loading={action === 'sign'}
+                    disabled={action === 'decline' || !session.allowsSigning || !canSign}
+                  >
+                    Sign document
+                  </Button>
+                </div>
+              </>
+            )}
+            <div className="flex items-center gap-2 pt-2 text-xs text-slate-400">
+              <ShieldCheck className="h-4 w-4" />
+              Your IP address, timestamp, browser, and the values you complete are recorded to the
+              audit trail. Powered by {brand?.displayName ?? 'Signara'}.
+            </div>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }

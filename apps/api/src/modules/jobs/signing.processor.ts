@@ -62,6 +62,7 @@ export class SigningProcessor extends WorkerHost {
       senderEmail: recipient,
       documentTitle,
       documentUrl: `${webUrl.replace(/\/$/, '')}/documents/${request.documentId}`,
+      organizationId: request.organizationId,
     });
 
     this.logger.log(
@@ -136,6 +137,7 @@ export class SigningProcessor extends WorkerHost {
       deadline: signer.request.deadline,
       message: signer.request.message,
       signUrl,
+      organizationId: signer.request.organizationId,
     });
 
     if (sent) {

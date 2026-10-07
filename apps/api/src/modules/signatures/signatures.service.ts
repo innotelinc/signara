@@ -26,6 +26,7 @@ import { MinioService } from '../../storage/minio.service';
 import { CertificatesService, CertificateEvidence } from '../certificates/certificates.service';
 import { unsignedAssurance } from '../certificates/identity-assurance';
 import { WebhooksService, WebhookEvent } from '../webhooks/webhooks.service';
+import { BrandingService } from '../branding/branding.service';
 import { AuthenticatedUser } from '../../common/types';
 
 /** A placed field's value, as submitted by the signer filling it. */
@@ -116,6 +117,7 @@ export class SignaturesService {
     private readonly config: ConfigService,
     @InjectQueue('signing') private readonly signingQueue: Queue,
     private readonly webhooks: WebhooksService,
+    private readonly branding: BrandingService,
   ) {}
 
   // ------------------------------------------------------------ create ----
@@ -371,6 +373,10 @@ export class SignaturesService {
       deadline: signer.request.deadline,
       mode: signer.request.mode,
       allowsSigning: canSignNow,
+      // The organization's own identity, so the signing page a signer lands on
+      // is the tenant's, not the platform's (issue #87). Falls back to the
+      // platform identity when the organization has set no branding.
+      branding: await this.branding.forOrganization(signer.request.organizationId),
 
       authMethod: signer.role === SignerRole.SIGNER ? (signer.userId ? 'oidc' : 'email') : 'email',
       // Only the fields *this* signer must fill. A placement belongs to one
@@ -800,6 +806,10 @@ export class SignaturesService {
           : null,
         documentHash: request.document.checksumSha256,
       },
+      // The certificate carries the tenant's identity too (issue #87) — the old
+      // page had an `Organization :` line, and a branded deployment should not
+      // issue a certificate that names another company.
+      branding: await this.branding.forOrganization(request.organizationId),
       envelope: {
         signers: request.signers.map((s) => ({
           email: s.email,
