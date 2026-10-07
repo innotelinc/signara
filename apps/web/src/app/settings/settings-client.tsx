@@ -9,11 +9,13 @@ import {
   UserRound,
   Users,
   KeyRound,
+  Webhook,
 } from 'lucide-react';
 import { api, ApiError } from '@/lib/api';
 import { Badge, Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button, Spinner } from '@/components/ui/button';
 import { TeamMembersTable } from '@/components/team-members-table';
+import { WebhookEndpointsPanel } from '@/components/webhook-endpoints-panel';
 import { mapMembers, type MembershipItem, type OrgMember } from '@/lib/org-members';
 import { cn } from '@/lib/cn';
 
@@ -35,13 +37,14 @@ interface Org {
   _count?: { memberships: number; documents: number; workspaces: number };
 }
 
-type Tab = 'profile' | 'organization' | 'team' | 'billing';
+type Tab = 'profile' | 'organization' | 'team' | 'billing' | 'webhooks';
 
 const TABS: { id: Tab; label: string; icon: typeof UserRound }[] = [
   { id: 'profile', label: 'Profile', icon: UserRound },
   { id: 'organization', label: 'Organization', icon: Building2 },
   { id: 'team', label: 'Team', icon: Users },
   { id: 'billing', label: 'Billing', icon: CreditCard },
+  { id: 'webhooks', label: 'Webhooks', icon: Webhook },
 ];
 
 export function Settings() {
@@ -305,6 +308,8 @@ export function Settings() {
           )}
 
           {tab === 'team' && <TeamMembersTable members={members} />}
+
+          {tab === 'webhooks' && <WebhookEndpointsPanel />}
 
           {tab === 'billing' && (
             <Card>

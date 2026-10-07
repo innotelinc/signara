@@ -384,6 +384,109 @@ describe('WebhooksService', () => {
       );
       expect(prismaMock.webhookEndpoint.update).not.toHaveBeenCalled();
     });
+
+    it('returns fresh health so the console row updates without a refetch', async () => {
+      prismaMock.webhookEndpoint.findFirst.mockResolvedValue({ id: 'wh-1' });
+      prismaMock.webhookEndpoint.update.mockResolvedValue({
+        id: 'wh-1',
+        active: true,
+        createdAt: new Date('2026-09-01T00:00:00Z'),
+      });
+      prismaMock.webhookDelivery.findFirst.mockResolvedValue(null);
+      prismaMock.webhookDelivery.count.mockResolvedValue(0);
+
+      const result = await service.setActive(user, 'wh-1', true);
+      expect(result.health).toMatchObject({ status: 'healthy', disabledReason: null });
+    });
+  });
+
+  describe('list health', () => {
+    const NOW = new Date('2026-10-07T12:00:00Z');
+    const daysAgo = (n: number) => new Date(NOW.getTime() - n * 24 * 60 * 60 * 1000);
+
+    const row = (overrides: Record<string, unknown> = {}) => ({
+      id: 'wh-1',
+      url: 'https://hooks.example.com/signara',
+      events: ['*'],
+      description: null,
+      active: true,
+      disabledAt: null,
+      createdAt: daysAgo(40),
+      ...overrides,
+    });
+
+    beforeEach(() => {
+      jest.useFakeTimers().setSystemTime(NOW);
+    });
+
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    it('reports a healthy endpoint with its last success and no reason', async () => {
+      prismaMock.webhookEndpoint.findMany.mockResolvedValue([row()]);
+      prismaMock.webhookDelivery.findFirst
+        .mockResolvedValueOnce({ deliveredAt: daysAgo(1) }) // last success
+        .mockResolvedValueOnce(null); // last failure
+      prismaMock.webhookDelivery.count.mockResolvedValue(0);
+
+      const [endpoint] = await service.list(user);
+
+      expect(endpoint.health).toMatchObject({
+        status: 'healthy',
+        failuresSinceSuccess: 0,
+        lastSuccessAt: daysAgo(1),
+        lastError: null,
+        disabledReason: null,
+      });
+    });
+
+    it('marks a live endpoint failing and carries the last error', async () => {
+      prismaMock.webhookEndpoint.findMany.mockResolvedValue([row()]);
+      prismaMock.webhookDelivery.findFirst
+        .mockResolvedValueOnce({ deliveredAt: daysAgo(3) })
+        .mockResolvedValueOnce({ error: 'HTTP 500', lastAttemptAt: daysAgo(1) });
+      prismaMock.webhookDelivery.count.mockResolvedValue(4);
+
+      const [endpoint] = await service.list(user);
+
+      expect(endpoint.health).toMatchObject({
+        status: 'failing',
+        failuresSinceSuccess: 4,
+        lastError: 'HTTP 500',
+        disabledReason: null,
+      });
+    });
+
+    it('does not call a stale failure current trouble after a later success', async () => {
+      prismaMock.webhookEndpoint.findMany.mockResolvedValue([row()]);
+      prismaMock.webhookDelivery.findFirst
+        .mockResolvedValueOnce({ deliveredAt: daysAgo(1) }) // last success
+        .mockResolvedValueOnce({ error: 'HTTP 500', lastAttemptAt: daysAgo(5) }); // older failure
+      prismaMock.webhookDelivery.count.mockResolvedValue(3);
+
+      const [endpoint] = await service.list(user);
+      expect(endpoint.health.status).toBe('healthy');
+    });
+
+    it('explains why a disabled endpoint stopped, in one actionable sentence', async () => {
+      prismaMock.webhookEndpoint.findMany.mockResolvedValue([
+        row({ active: false, disabledAt: NOW }),
+      ]);
+      prismaMock.webhookDelivery.findFirst
+        .mockResolvedValueOnce(null) // never delivered successfully
+        .mockResolvedValueOnce({ error: 'getaddrinfo ENOTFOUND', lastAttemptAt: daysAgo(1) });
+      prismaMock.webhookDelivery.count.mockResolvedValue(9);
+
+      const [endpoint] = await service.list(user);
+
+      expect(endpoint.health.status).toBe('disabled');
+      expect(endpoint.health.failuresSinceSuccess).toBe(9);
+      expect(endpoint.health.disabledReason).toMatch(
+        /9 failed delivery attempt\(s\) in 40 day\(s\)/,
+      );
+      expect(endpoint.health.disabledReason).toContain('getaddrinfo ENOTFOUND');
+    });
   });
 
   describe('deliver', () => {

@@ -30,6 +30,35 @@ export const WEBHOOK_EVENTS = [
 
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
 
+/** Endpoint columns safe to return by a read route — never `secret`. */
+const ENDPOINT_SELECT = {
+  id: true,
+  url: true,
+  events: true,
+  description: true,
+  active: true,
+  disabledAt: true,
+  createdAt: true,
+} satisfies Prisma.WebhookEndpointSelect;
+
+/**
+ * What the console shows about an endpoint beyond its row. The disable sweep
+ * acts in the background and the endpoint row only ever said `active: false`;
+ * this is the "why" — failures since the last success, the last error the
+ * subscriber returned, and a sentence an operator can act on.
+ */
+export interface WebhookEndpointHealth {
+  /** `disabled` is terminal until re-enabled; `failing` is live but hurt. */
+  status: 'healthy' | 'failing' | 'disabled';
+  /** Failed attempts recorded since the last success, or since registration. */
+  failuresSinceSuccess: number;
+  lastSuccessAt: Date | null;
+  lastFailureAt: Date | null;
+  lastError: string | null;
+  /** Human-readable reason, present only while the endpoint is disabled. */
+  disabledReason: string | null;
+}
+
 interface EmitInput {
   organizationId: string;
   /** Included in the payload so a subscriber can correlate without a second call. */
@@ -169,22 +198,106 @@ export class WebhooksService {
     };
   }
 
+  /**
+   * Endpoints with a health summary derived from their delivery history. The
+   * console needs more than the raw list: an inactive row has to say why it
+   * stopped and a live one has to show when it started failing.
+   */
   async list(user: AuthenticatedUser) {
     const orgId = user.org?.id;
     if (!orgId) throw new ForbiddenException('No active tenant');
-    return this.prisma.webhookEndpoint.findMany({
+    const endpoints = await this.prisma.webhookEndpoint.findMany({
       where: { organizationId: orgId },
-      select: {
-        id: true,
-        url: true,
-        events: true,
-        description: true,
-        active: true,
-        disabledAt: true,
-        createdAt: true,
-      },
+      select: ENDPOINT_SELECT,
       orderBy: { createdAt: 'desc' },
     });
+    const now = new Date();
+    return Promise.all(
+      endpoints.map(async (endpoint) => ({
+        ...endpoint,
+        health: await this.describeHealth(endpoint, now),
+      })),
+    );
+  }
+
+  /**
+   * Health of one endpoint, derived from `WebhookDelivery` the same way the
+   * sweep derives its disable decision, so the number the console shows is the
+   * number that will decide whether it gets disabled.
+   */
+  private async describeHealth(
+    endpoint: { id: string; active: boolean; createdAt: Date },
+    now: Date,
+  ): Promise<WebhookEndpointHealth> {
+    const [lastSuccess, lastFailure] = await Promise.all([
+      this.prisma.webhookDelivery.findFirst({
+        where: { endpointId: endpoint.id, status: WebhookDeliveryStatus.DELIVERED },
+        orderBy: { deliveredAt: 'desc' },
+        select: { deliveredAt: true },
+      }),
+      this.prisma.webhookDelivery.findFirst({
+        where: { endpointId: endpoint.id, status: WebhookDeliveryStatus.FAILED },
+        orderBy: { lastAttemptAt: 'desc' },
+        select: { error: true, lastAttemptAt: true },
+      }),
+    ]);
+
+    const lastSuccessAt = lastSuccess?.deliveredAt ?? null;
+    // Counted from the last good delivery, or registration when there was
+    // never one — identical to the sweep's window.
+    const since = lastSuccessAt ?? endpoint.createdAt;
+    const failuresSinceSuccess = await this.prisma.webhookDelivery.count({
+      where: {
+        endpointId: endpoint.id,
+        status: WebhookDeliveryStatus.FAILED,
+        OR: [{ lastAttemptAt: { gt: since } }, { lastAttemptAt: null, createdAt: { gt: since } }],
+      },
+    });
+
+    const lastFailureAt = lastFailure?.lastAttemptAt ?? null;
+    const lastError = lastFailure?.error ?? null;
+    // A failure older than the last success is history, not current trouble.
+    const failing =
+      failuresSinceSuccess > 0 &&
+      (lastSuccessAt === null || (lastFailureAt !== null && lastFailureAt > lastSuccessAt));
+
+    const status: WebhookEndpointHealth['status'] = !endpoint.active
+      ? 'disabled'
+      : failing
+        ? 'failing'
+        : 'healthy';
+
+    return {
+      status,
+      failuresSinceSuccess,
+      lastSuccessAt,
+      lastFailureAt,
+      lastError,
+      disabledReason:
+        status === 'disabled'
+          ? this.describeDisableReason(since, failuresSinceSuccess, lastError, now)
+          : null,
+    };
+  }
+
+  /**
+   * One sentence an operator can act on: how long the endpoint has been
+   * unhealthy, how many attempts failed, and the last error the subscriber
+   * returned. This is the reason the disable notification promised but the
+   * endpoint row never carried.
+   */
+  private describeDisableReason(
+    since: Date,
+    failures: number,
+    lastError: string | null,
+    now: Date,
+  ): string {
+    const days = Math.max(1, Math.round((now.getTime() - since.getTime()) / 86_400_000));
+    const window =
+      failures > 0
+        ? `${failures} failed delivery attempt(s) in ${days} day(s)`
+        : `no successful delivery in ${days} day(s)`;
+    return `${window}${lastError ? ` — last error: ${lastError}` : ''}. Re-enable once the subscriber is fixed.`;
   }
 
   async remove(user: AuthenticatedUser, id: string) {
@@ -253,19 +366,13 @@ export class WebhooksService {
     });
     if (!endpoint) throw new NotFoundException('Webhook endpoint not found');
 
-    return this.prisma.webhookEndpoint.update({
+    const updated = await this.prisma.webhookEndpoint.update({
       where: { id },
       data: { active, disabledAt: active ? null : new Date() },
-      select: {
-        id: true,
-        url: true,
-        events: true,
-        description: true,
-        active: true,
-        disabledAt: true,
-        createdAt: true,
-      },
+      select: ENDPOINT_SELECT,
     });
+    // Fresh health so the console row updates without a second round trip.
+    return { ...updated, health: await this.describeHealth(updated, new Date()) };
   }
 
   /**
