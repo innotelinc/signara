@@ -5,7 +5,10 @@ import { EmailService } from './mailer.service';
 describe('EmailService', () => {
   function build(config: Record<string, unknown>) {
     return Test.createTestingModule({
-      providers: [EmailService, { provide: ConfigService, useValue: { get: (k: string) => config[k] ?? undefined } }],
+      providers: [
+        EmailService,
+        { provide: ConfigService, useValue: { get: (k: string) => config[k] ?? undefined } },
+      ],
     }).compile();
   }
 
@@ -54,5 +57,40 @@ describe('EmailService', () => {
     expect(html).not.toContain('<script>alert(1)</script>');
     expect(html).toContain('sgn_abc');
     expect(subject).toContain('Reminder');
+  });
+
+  it('sendCompletionMail keeps the retired platform subject and escapes the title', async () => {
+    const moduleRef = await build({});
+    const svc = moduleRef.get(EmailService);
+    const sent = await svc.sendCompletionMail({
+      senderName: 'Dana',
+      senderEmail: 'originator@signara.local',
+      documentTitle: 'NDA <script>alert(1)</script>',
+      documentUrl: 'https://app.signara.innotel.us/documents/doc-1',
+    });
+    expect(sent).toBe(false); // SMTP unset, but rendering must not throw
+
+    const { renderCompletionEmail } = await import('./email-templates');
+    const { subject, html } = renderCompletionEmail({
+      senderName: 'Dana',
+      senderEmail: 'originator@signara.local',
+      documentTitle: 'NDA <script>alert(1)</script>',
+      documentUrl: 'https://app.signara.innotel.us/documents/doc-1',
+    });
+    // The subject is the retired platform's wording, verbatim (#83).
+    expect(subject).toBe('Document NDA <script>alert(1)</script> has been signed by all parties');
+    expect(html).toContain('&lt;script&gt;');
+    expect(html).not.toContain('<script>alert(1)</script>');
+    expect(html).toContain('https://app.signara.innotel.us/documents/doc-1');
+    expect(html).toContain('Hi Dana,');
+  });
+
+  it('sends the completion mail From the deployment identity, not a per-tenant one', async () => {
+    const moduleRef = await build({
+      'smtp.from': 'Signara by Innotel <no-reply@signara.innotel.us>',
+    });
+    expect(moduleRef.get(EmailService).from()).toBe(
+      'Signara by Innotel <no-reply@signara.innotel.us>',
+    );
   });
 });

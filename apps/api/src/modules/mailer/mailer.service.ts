@@ -2,7 +2,12 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
 import type { Transporter } from 'nodemailer';
-import { renderInviteEmail, renderReminderEmail, renderNotificationEmail } from './email-templates';
+import {
+  renderInviteEmail,
+  renderReminderEmail,
+  renderNotificationEmail,
+  renderCompletionEmail,
+} from './email-templates';
 
 export interface MailMessage {
   to: string;
@@ -10,6 +15,18 @@ export interface MailMessage {
   html: string;
   /** Optional plain-text fallback; when omitted a minimal text body is derived. */
   text?: string;
+}
+
+/**
+ * What the originator sees once everyone has signed (issue #83). The recipient
+ * is the request's sender, not a signer.
+ */
+export interface CompletionMailContext {
+  senderName?: string | null;
+  senderEmail: string;
+  documentTitle: string;
+  /** Where the originator downloads the signed PDF (the web document page). */
+  documentUrl: string;
 }
 
 export interface SigningMailContext {
@@ -55,6 +72,17 @@ export class EmailService {
     const { html, text, subject } =
       kind === 'reminder' ? renderReminderEmail(ctx) : renderInviteEmail(ctx);
     return this.send({ to: ctx.signerEmail, subject, html, text });
+  }
+
+  /**
+   * Sends the completion email to the request's originator (issue #83). The
+   * `From` is the deployment identity (`from()`), deliberate: the retired
+   * platform sent this under the same SMTP identity, and keeping it stable is
+   * what keeps SPF/DKIM/DMARC aligned and the mail out of spam.
+   */
+  async sendCompletionMail(ctx: CompletionMailContext): Promise<boolean> {
+    const { html, text, subject } = renderCompletionEmail(ctx);
+    return this.send({ to: ctx.senderEmail, subject, html, text });
   }
 
   /** Sends a generic notification email (in-app notification digests etc.). */

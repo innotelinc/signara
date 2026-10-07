@@ -8,6 +8,9 @@ import { SignaturesService } from '../signatures/signatures.service';
 /** Repeatable job that finds requests due for an automatic reminder (#82). */
 export const SWEEP_REMINDERS_JOB = 'sweep-reminders';
 
+/** One-shot job that emails the originator once everyone has signed (#83). */
+export const COMPLETION_MAIL_JOB = 'send-completion-mail';
+
 interface SigningJob {
   requestId?: string;
   signerId?: string;
@@ -26,6 +29,48 @@ interface SigningJob {
 export class SigningProcessor extends WorkerHost {
   private readonly logger = new Logger('SigningProcessor');
 
+  /**
+   * Emails the request's originator that everyone has signed (issue #83). Sent
+   * under the deployment's From identity (`EmailService.from()`), which is the
+   * whole point of the issue: the completion mail must keep arriving from the
+   * same address the retired platform used, or SPF/DKIM/DMARC have to be
+   * re-earned after the cutover.
+   */
+  private async sendCompletionMail(requestId?: string): Promise<void> {
+    if (!requestId) return;
+    const request = await this.prisma.signingRequest.findUnique({
+      where: { id: requestId },
+      include: {
+        document: { select: { title: true } },
+        createdBy: { select: { email: true, displayName: true } },
+      },
+    });
+    if (!request) {
+      this.logger.warn(`completion mail: request ${requestId} not found; skipping`);
+      return;
+    }
+    const recipient = request.createdBy?.email;
+    if (!recipient) {
+      this.logger.warn(`completion mail: request ${requestId} has no originator email; skipping`);
+      return;
+    }
+
+    const webUrl = process.env.WEB_URL ?? 'https://app.signara.innotel.us';
+    const documentTitle = request.title ?? request.document?.title ?? 'document';
+    const sent = await this.mailer.sendCompletionMail({
+      senderName: request.createdBy?.displayName,
+      senderEmail: recipient,
+      documentTitle,
+      documentUrl: `${webUrl.replace(/\/$/, '')}/documents/${request.documentId}`,
+    });
+
+    this.logger.log(
+      sent
+        ? `[completion] emailed ${recipient} for request ${requestId}`
+        : `[completion] SMTP not configured — would email ${recipient} for request ${requestId}`,
+    );
+  }
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly mailer: EmailService,
@@ -40,6 +85,13 @@ export class SigningProcessor extends WorkerHost {
       this.logger.log(
         `reminder sweep: ${swept.requests} request(s) due, ${swept.enqueued} reminder(s) queued`,
       );
+      return;
+    }
+
+    // The completion mail goes to the originator, not a signer, so it carries
+    // only a requestId and is handled before the signer lookup below.
+    if (job.name === COMPLETION_MAIL_JOB) {
+      await this.sendCompletionMail(job.data.requestId);
       return;
     }
 

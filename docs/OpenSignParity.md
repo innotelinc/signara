@@ -162,13 +162,27 @@ _both_ the body and the subject; otherwise the defaults above applied
 
 **What Signara sends today, for comparison** (`apps/api/src/modules/mailer/`):
 invite `Please sign: <title>`, reminder `Reminder: <title>`, notification subject =
-the notification's title, footer identity "Signara · Secure Every Signature", no
-completion mail as such and no per-tenant subject/body override. So #83 is a
-wording **and** override gap, not only a sender-address question.
+the notification's title, footer identity "Signara · Secure Every Signature". The
+completion mail **landed 2026-10-07** (issue #83, `renderCompletionEmail`) with
+the subject above **verbatim** and the body kept in the same shape — one recorded
+departure from the wording: the old body said _"Kindly download the document from
+the attachment"_, and Signara does not attach the PDF (it lives in the object
+store and is fetched through the web app), so the completion mail **links** to
+the document page instead of promising an attachment. The completion mail is sent
+to the request's **originator** (the old `{{sender_name}}`), as a queue job so a
+mail failure retries without touching the signature that triggered it.
+
+No per-tenant subject/body override exists yet — that is the remaining half of
+the row, tracked by #87 (sender templates per organization).
 
 The sending identity is the part that costs something if it changes: completion and
 request mail went out under the deployment's SMTP/`MAILGUN_SENDER` identity, and
-roadmap §W5 keeps that stable so deliverability does not regress.
+roadmap §W5 keeps that stable so deliverability does not regress. Signara keeps
+that property structurally: the completion mail's `From` is
+`EmailService.from()` — the deployment's `smtp.from` (default
+`Signara <no-reply@signara.innotel.us>`) — **never** a per-tenant address, so a
+tenant cannot move the signing mail onto a domain whose SPF/DKIM/DMARC we have
+not published.
 
 ## 3. Certificate of completion — issue #84
 

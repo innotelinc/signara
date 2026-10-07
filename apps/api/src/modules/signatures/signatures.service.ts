@@ -1162,6 +1162,7 @@ export class SignaturesService {
         data: { status: DocumentStatus.COMPLETED },
       });
       await this.recordEvent(requestId, SignatureEventType.SIGNED, null, { completed: true });
+      await this.enqueueCompletionMail(requestId);
       return;
     }
 
@@ -1379,6 +1380,20 @@ export class SignaturesService {
           },
         }),
       ),
+    );
+  }
+
+  /**
+   * Queues the originator's completion email (issue #83). A job, like the
+   * invites, so a mail failure retries without touching the signature that
+   * triggered it. The stable `jobId` keeps a re-fired completion from emailing
+   * the originator twice.
+   */
+  private async enqueueCompletionMail(requestId: string): Promise<void> {
+    await this.signingQueue.add(
+      'send-completion-mail',
+      { requestId },
+      { delay: 0, attempts: 5, jobId: `completion-${requestId}` },
     );
   }
 

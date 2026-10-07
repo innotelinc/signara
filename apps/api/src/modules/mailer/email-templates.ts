@@ -1,4 +1,4 @@
-import type { SigningMailContext } from './mailer.service';
+import type { CompletionMailContext, SigningMailContext } from './mailer.service';
 
 /** Escapes user-controlled text so template injection can't break HTML. */
 export function escapeHtml(value: unknown): string {
@@ -63,7 +63,11 @@ function button(text: string, href: string): string {
   </table>`;
 }
 
-export function renderInviteEmail(ctx: SigningMailContext): { subject: string; html: string; text: string } {
+export function renderInviteEmail(ctx: SigningMailContext): {
+  subject: string;
+  html: string;
+  text: string;
+} {
   const subject = `Please sign: ${ctx.documentTitle}`;
   const parts: string[] = [];
   parts.push(
@@ -71,23 +75,37 @@ export function renderInviteEmail(ctx: SigningMailContext): { subject: string; h
     `<p style="margin:0;">${ctx.signerName ? `<strong>${escapeHtml(ctx.signerName)}</strong>, you` : 'You'} have been asked to sign <strong>${escapeHtml(ctx.documentTitle)}</strong> via Signara.</p>`,
   );
   if (ctx.requestTitle && ctx.requestTitle !== ctx.documentTitle) {
-    parts.push(`<p style="margin:8px 0 0;color:#374151;">Request: ${escapeHtml(ctx.requestTitle)}</p>`);
+    parts.push(
+      `<p style="margin:8px 0 0;color:#374151;">Request: ${escapeHtml(ctx.requestTitle)}</p>`,
+    );
   }
   if (ctx.deadline) {
-    parts.push(`<p style="margin:8px 0 0;color:#374151;">Sign by: ${escapeHtml(formatDeadline(ctx.deadline))}</p>`);
+    parts.push(
+      `<p style="margin:8px 0 0;color:#374151;">Sign by: ${escapeHtml(formatDeadline(ctx.deadline))}</p>`,
+    );
   }
   if (ctx.message) {
-    parts.push(`<p style="margin:8px 0 0;color:#374151;font-style:italic;">"${escapeHtml(ctx.message)}"</p>`);
+    parts.push(
+      `<p style="margin:8px 0 0;color:#374151;font-style:italic;">"${escapeHtml(ctx.message)}"</p>`,
+    );
   }
   parts.push(button('Review & sign document', ctx.signUrl));
   parts.push(
     `<p style="margin:0;font-size:13px;color:#6b7280;">This link is personal and secret — don't forward it. If you're signing in sequence, others can't sign until your turn is complete.</p>`,
   );
   const html = shell(parts.join('\n'));
-  return { subject, html, text: `You've been invited to sign ${ctx.documentTitle}. Open ${ctx.signUrl}` };
+  return {
+    subject,
+    html,
+    text: `You've been invited to sign ${ctx.documentTitle}. Open ${ctx.signUrl}`,
+  };
 }
 
-export function renderReminderEmail(ctx: SigningMailContext): { subject: string; html: string; text: string } {
+export function renderReminderEmail(ctx: SigningMailContext): {
+  subject: string;
+  html: string;
+  text: string;
+} {
   const subject = `Reminder: ${ctx.documentTitle}`;
   const parts: string[] = [];
   parts.push(
@@ -95,7 +113,9 @@ export function renderReminderEmail(ctx: SigningMailContext): { subject: string;
     `<p style="margin:0;">This is a reminder to sign <strong>${escapeHtml(ctx.documentTitle)}</strong>.${ctx.deadline ? ` The requested deadline was ${escapeHtml(formatDeadline(ctx.deadline))}.` : ''}</p>`,
   );
   if (ctx.message) {
-    parts.push(`<p style="margin:8px 0 0;color:#374151;font-style:italic;">"${escapeHtml(ctx.message)}"</p>`);
+    parts.push(
+      `<p style="margin:8px 0 0;color:#374151;font-style:italic;">"${escapeHtml(ctx.message)}"</p>`,
+    );
   }
   parts.push(button('Sign the document', ctx.signUrl));
   parts.push(
@@ -105,12 +125,56 @@ export function renderReminderEmail(ctx: SigningMailContext): { subject: string;
   return { subject, html, text: `Reminder: please sign ${ctx.documentTitle}. Open ${ctx.signUrl}` };
 }
 
-export function renderNotificationEmail(title: string, body: string): { subject: string; html: string; text: string } {
+/**
+ * The completion mail — what the originator gets once every party has signed
+ * (issue #83).
+ *
+ * The subject is the retired platform's, verbatim:
+ * `Document <title> has been signed by all parties`. The body keeps its shape
+ * too, with one deliberate departure, recorded in docs/OpenSignParity.md §2:
+ * the old body said "Kindly download the document from the attachment", and
+ * Signara does not attach the PDF (it lives in the object store and is fetched
+ * through the web app), so the line links instead of promising an attachment.
+ *
+ * The From identity is the deployment's (`EmailService.from()`), never
+ * per-tenant: changing it after the cutover is what would fail SPF/DKIM/DMARC,
+ * and the whole point of #83 is that the completion mail must keep arriving.
+ */
+export function renderCompletionEmail(ctx: CompletionMailContext): {
+  subject: string;
+  html: string;
+  text: string;
+} {
+  const subject = `Document ${ctx.documentTitle} has been signed by all parties`;
+  const greeting = ctx.senderName ? `Hi ${escapeHtml(ctx.senderName)},` : 'Hi,';
+  const parts: string[] = [
+    `<h2 style="margin:0 0 8px;color:#111827;font-size:18px;">All parties have signed</h2>`,
+    `<p style="margin:0;">${greeting}</p>`,
+    `<p style="margin:8px 0 0;">All parties have successfully signed the document <strong>${escapeHtml(ctx.documentTitle)}</strong>. Download the completed document from the link below.</p>`,
+  ];
+  parts.push(button('Download the signed document', ctx.documentUrl));
+  parts.push(
+    `<p style="margin:0;font-size:13px;color:#6b7280;">The completed certificate and the full audit trail are available from the document page.</p>`,
+  );
+  const html = shell(parts.join('\n'));
+  return {
+    subject,
+    html,
+    text: `${ctx.senderName ? `Hi ${ctx.senderName}, ` : ''}All parties have successfully signed the document ${ctx.documentTitle}. Download it: ${ctx.documentUrl}`,
+  };
+}
+
+export function renderNotificationEmail(
+  title: string,
+  body: string,
+): { subject: string; html: string; text: string } {
   const parts: string[] = [
     `<h2 style="margin:0 0 8px;color:#111827;font-size:18px;">${escapeHtml(title)}</h2>`,
   ];
   if (body) {
-    parts.push(`<p style="margin:0;color:#374151;">${escapeHtml(body).replace(/\n/g, '<br/>')}</p>`);
+    parts.push(
+      `<p style="margin:0;color:#374151;">${escapeHtml(body).replace(/\n/g, '<br/>')}</p>`,
+    );
   }
   const html = shell(parts.join('\n'));
   return { subject: title, html, text: body ? `${title}\n\n${body}` : title };
