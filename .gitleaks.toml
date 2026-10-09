@@ -1,14 +1,14 @@
 # gitleaks configuration.
 #
-# Extends the default rule set; the only change is a path allowlist for the
-# harvested i18n catalogs, which the generic-api-key heuristic reads as
-# credentials even though they contain none.
+# Extends the default rule set; the only changes are allowlists for content that
+# generic-api-key's entropy heuristic reads as credentials even though none of
+# it is secret.
 
 [extend]
 useDefault = true
 
 [allowlist]
-description = "Public i18n catalogs — translation strings, not credentials"
+description = "Public i18n catalogs and OIDC JWKS endpoint paths — no credentials"
 paths = [
   # The catalogs are byte-identity pinned (see .prettierignore and
   # apps/web/public/locales/README.md) and are served to browsers verbatim.
@@ -18,4 +18,15 @@ paths = [
   # secret, and they cannot be reformatted to avoid the match without
   # breaking the byte-identity the harvest rests on.
   '''apps/web/public/locales/.*\.json''',
+]
+# OIDC discovery / JWKS endpoint paths. The generic-api-key heuristic reads the
+# "host:port/path" form of a URL as key:value, so what it captures is the
+# path tail of an OIDC JWKS default for OIDC_JWKS_URL (setup.sh,
+# docker-compose.dev.yml, docker-compose.prod.yml) — for example the
+# application path of the authentik console. A JWKS document served there is
+# public by definition and contains no credential; the match is purely on the
+# entropy of the application slug.
+regexes = [
+  '''/application/o/[A-Za-z0-9._/-]+''',
+  '''https://auth\.signara\.innotel\.us/[A-Za-z0-9._/-]+''',
 ]
