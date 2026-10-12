@@ -8,6 +8,9 @@
  */
 
 export interface OrgMember {
+  /** The membership row's id — this is what DELETE /users/:id takes. */
+  membershipId: string;
+  /** The user's id — stable identifier for the person. */
   id: string;
   email: string;
   displayName?: string | null;
@@ -36,6 +39,7 @@ export interface MembershipItem {
 
 export function mapMembers(items: MembershipItem[]): OrgMember[] {
   return items.map((m) => ({
+    membershipId: m.id,
     id: m.user.id,
     email: m.user.email,
     displayName: m.user.displayName,

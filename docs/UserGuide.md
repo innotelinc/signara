@@ -94,7 +94,23 @@ Every signing request keeps an evidence report:
 
 Senders and Auditors can download this report for record-keeping.
 
-## 8. FAQ
+## 8. Team & members
+
+**Settings → Team** lists everyone in your organization. If you are an owner or
+an administrator you can also manage them there:
+
+1. **Add member** — type their email, choose a role (Member, Manager, Auditor,
+   Administrator) and press **Add member**. An email that already has an account
+   is linked to the organization immediately; otherwise the account is created as
+   `INVITED` and authenticates through Authentik on first sign-in.
+2. **Remove** — the button on a member's row takes them out of the organization;
+   they lose access to its documents. The organization owner cannot be removed.
+
+Roles decide what a member may do (`members.invite`, `members.manage`,
+`signing.send`, and so on); see
+[AdministrationGuide.md](AdministrationGuide.md) for the full list.
+
+## 9. FAQ
 
 **Is my signature legally binding?** Electronic signatures are admissible under
 eIDAS (EU) and the ESIGN Act (US). Signara records intent, identity data,

@@ -58,6 +58,8 @@ describe('mapMembers', () => {
     const rows = mapMembers(REAL_NESTED_PAYLOAD.items);
     expect(rows).toHaveLength(2);
     expect(rows[0]).toEqual({
+      // The membership id is what DELETE /users/:id takes, the user id is the person.
+      membershipId: 'ddaf37fe-89ec-4f1d-a56e-f158c4a57006',
       id: 'af46fabd-34e4-4b0a-af59-a9379e23816e',
       email: 'dhunter@innotel.us',
       displayName: 'Darnel Hunter',
@@ -94,5 +96,21 @@ describe('TeamMembersTable', () => {
   it('renders the empty state when there are no members', () => {
     const html = renderToString(<TeamMembersTable members={[]} />);
     expect(html).toContain('No members listed');
+  });
+
+  it('hides the Actions column when the caller cannot manage members', () => {
+    const members = mapMembers(REAL_NESTED_PAYLOAD.items);
+    const html = renderToString(<TeamMembersTable members={members} />);
+    expect(html).not.toContain('Remove');
+  });
+
+  it('offers a Remove action per non-owner row when the caller can manage members', () => {
+    const members = mapMembers(REAL_NESTED_PAYLOAD.items);
+    const html = renderToString(<TeamMembersTable members={members} onRemove={() => {}} />);
+    expect(html).toContain('Actions');
+    // The OWNER seat is not removable (the API rejects it), so only the MEMBER row
+    // gets a Remove button — and it is labelled for screen readers.
+    expect(html.match(/Remove<\/button>/g) ?? []).toHaveLength(1);
+    expect(html).toContain('aria-label="Remove member@example.com"');
   });
 });

@@ -1,11 +1,13 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useState } from 'react';
 import {
   Building2,
   CreditCard,
+  Minus,
   Save,
   ShieldCheck,
+  UserPlus,
   UserRound,
   Users,
   KeyRound,
@@ -47,6 +49,9 @@ const TABS: { id: Tab; label: string; icon: typeof UserRound }[] = [
   { id: 'webhooks', label: 'Webhooks', icon: Webhook },
 ];
 
+/** Roles a member can be invited with (the OWNER seat is not handed out here). */
+const INVITE_ROLES = ['MEMBER', 'MANAGER', 'AUDITOR', 'ADMIN'] as const;
+
 export function Settings() {
   const [tab, setTab] = useState<Tab>('profile');
   const [me, setMe] = useState<Me | null>(null);
@@ -64,6 +69,15 @@ export function Settings() {
   const [orgName, setOrgName] = useState('');
   const [legalName, setLegalName] = useState('');
   const [taxId, setTaxId] = useState('');
+
+  // Team tab state
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteRole, setInviteRole] = useState<(typeof INVITE_ROLES)[number]>('MEMBER');
+  const [inviting, setInviting] = useState(false);
+  const [removingId, setRemovingId] = useState<string | null>(null);
+
+  /** members.invite / members.manage are OWNER+ADMIN only on the API side. */
+  const canManageMembers = me?.org?.role === 'OWNER' || me?.org?.role === 'ADMIN';
 
   const load = useCallback(async () => {
     try {
@@ -130,6 +144,49 @@ export function Settings() {
       setError(err instanceof ApiError ? err.message : 'Failed to save organization');
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function inviteMember(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const email = inviteEmail.trim();
+    if (!email) return;
+    setInviting(true);
+    setError(null);
+    setSaved(null);
+    try {
+      await api.post<{ id: string; email: string; role: string }>('/api/v1/users/invite', {
+        email,
+        role: inviteRole,
+      });
+      setInviteEmail('');
+      setSaved(`${email} was added to the organization as ${inviteRole}.`);
+      await loadMembers();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to invite member');
+    } finally {
+      setInviting(false);
+    }
+  }
+
+  async function removeMember(member: OrgMember) {
+    const label = member.displayName ?? member.email;
+    const confirmed =
+      typeof window === 'undefined' ||
+      window.confirm(`Remove ${label} from the organization? They lose access to its documents.`);
+    if (!confirmed) return;
+
+    setRemovingId(member.membershipId);
+    setError(null);
+    setSaved(null);
+    try {
+      await api.del(`/api/v1/users/${member.membershipId}`);
+      setMembers((prev) => prev.filter((row) => row.membershipId !== member.membershipId));
+      setSaved(`${label} was removed from the organization.`);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to remove member');
+    } finally {
+      setRemovingId(null);
     }
   }
 
@@ -307,7 +364,78 @@ export function Settings() {
             </Card>
           )}
 
-          {tab === 'team' && <TeamMembersTable members={members} />}
+          {tab === 'team' && (
+            <div className="space-y-6">
+              {canManageMembers && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Invite a member</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <form onSubmit={(e) => void inviteMember(e)} className="space-y-4">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                        <div className="min-w-0 flex-1">
+                          <label className="label" htmlFor="invite-email">
+                            Email
+                          </label>
+                          <input
+                            id="invite-email"
+                            type="email"
+                            required
+                            className="input"
+                            value={inviteEmail}
+                            onChange={(e) => setInviteEmail(e.target.value)}
+                            placeholder="teammate@example.com"
+                          />
+                        </div>
+                        <div>
+                          <label className="label" htmlFor="invite-role">
+                            Role
+                          </label>
+                          <select
+                            id="invite-role"
+                            className="input"
+                            value={inviteRole}
+                            onChange={(e) =>
+                              setInviteRole(e.target.value as (typeof INVITE_ROLES)[number])
+                            }
+                          >
+                            {INVITE_ROLES.map((role) => (
+                              <option key={role} value={role}>
+                                {role}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <Button type="submit" loading={inviting} disabled={!inviteEmail.trim()}>
+                          <UserPlus className="h-4 w-4" />
+                          Add member
+                        </Button>
+                      </div>
+                      <p className="text-xs text-slate-500">
+                        Adding an email that already has an account links it to this
+                        organization right away; otherwise the account is created in the
+                        INVITED state.
+                      </p>
+                    </form>
+                  </CardContent>
+                </Card>
+              )}
+
+              <TeamMembersTable
+                members={members}
+                onRemove={canManageMembers ? (member) => void removeMember(member) : undefined}
+                removingId={removingId}
+              />
+
+              {!canManageMembers && (
+                <p className="flex items-center gap-2 text-xs text-slate-500">
+                  <Minus className="h-3.5 w-3.5" />
+                  Only organization owners and administrators can add or remove members.
+                </p>
+              )}
+            </div>
+          )}
 
           {tab === 'webhooks' && <WebhookEndpointsPanel />}
 
