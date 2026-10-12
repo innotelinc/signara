@@ -259,4 +259,12 @@ find "$BACKUP_DIR" -type f \( -name 'db-*.dump' -o -name 'authentik-db-*.dump' \
 find "$BACKUP_DIR/minio" -mindepth 1 -maxdepth 1 -type d -mtime "+$RETENTION_DAYS" -exec rm -rf {} +
 
 log "Backup stored in $BACKUP_DIR"
-ls -lh "$BACKUP_DIR" | head -20
+# `head` here was a trap. It exits as soon as it has printed its 20 lines, which
+# sends SIGPIPE to `ls`; under `set -o pipefail` that made the whole run exit 141
+# and report a failed backup that had in fact dumped, archived, mirrored and
+# pruned. It could not show up until the cache held more than 20 entries — that
+# is, until the job was working well enough to have run for a while — so it
+# arrived as a permanent `BackupJobFailed` on a healthy job (2026-10-12). `sed`
+# reads its input to the end, so how long this listing is can no longer decide
+# the run's status.
+ls -lh "$BACKUP_DIR" | sed -n '1,20p'
