@@ -1,5 +1,6 @@
 import { renderToString } from 'react-dom/server';
-import SignDemoPage, { DemoRoom, DocumentPage, routeAfter } from './page';
+import { DemoRoom, DocumentPage, routeAfter } from './demo-room';
+import SignDemoPage from './page';
 
 /**
  * The demo signing room's job is to show what signing *produces*, not to print a
