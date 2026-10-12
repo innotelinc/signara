@@ -84,7 +84,7 @@ COMPOSE="docker compose -f docker-compose.prod.yml -f docker-compose.override.pr
 | Restore       | `$COMPOSE exec backup /backup/restore.sh <file>`                            |
 | Stop services | `$COMPOSE down`                                                             |
 | Monitoring    | `$COMPOSE --profile monitoring up -d prometheus alertmanager`               |
-| Metrics       | Prometheus `127.0.0.1:9090`, Alertmanager `127.0.0.1:9093`               |
+| Metrics       | Prometheus `127.0.0.1:9090`, Alertmanager `127.0.0.1:9093`                  |
 
 **Using `-f docker-compose.prod.yml` alone is a real footgun, not a shortcut on
 this host.** `docker-compose.override.prod.yml` carries this deployment's

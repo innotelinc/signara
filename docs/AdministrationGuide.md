@@ -85,11 +85,11 @@ features or UI displays.
 
 ## 7. Observability for admins
 
-| Tool         | Where                                       | Use                                       |
-| ------------ | ------------------------------------------- | ----------------------------------------- |
-| Prometheus   | :9090 (loopback)                            | metrics, query & rule evaluation          |
-| Alertmanager | :9093 (loopback)                            | routes alerts to email                    |
-| Container logs | `docker compose logs <service>`           | bounded json-file logs, `requestId` per line |
+| Tool           | Where                           | Use                                          |
+| -------------- | ------------------------------- | -------------------------------------------- |
+| Prometheus     | :9090 (loopback)                | metrics, query & rule evaluation             |
+| Alertmanager   | :9093 (loopback)                | routes alerts to email                       |
+| Container logs | `docker compose logs <service>` | bounded json-file logs, `requestId` per line |
 
 Alerts to monitor (rules in `infra/monitoring/prometheus/rules.yml`):
 API 5xx > 5%, queue failure rate > 10%, certificate < 14 days, storage > 85%,
