@@ -38,7 +38,18 @@ IDENTITY_COVERED=0
 # distinction is what keeps IdentityDatabaseNotBackedUp honest: it must fire when
 # a configured dump goes missing, and stay quiet when identity is out of scope —
 # not the other way round.
+#
+# It is decided from the configuration here, before any dump is attempted, and
+# published on failure as well as success. Deciding it at the dump published the
+# flag only when the run got that far: a failure in an earlier step carried
+# whatever the last *successful* run left behind, and once that predates the
+# metric the key drops out of status.prom entirely — a series that is absent
+# cannot fire a rule, so "configured to cover identity, not covering it" went
+# quiet exactly when it began (2026-09-23, whose status file still held it).
 IDENTITY_EXPECTED=0
+if [[ -n "${AUTHENTIK_POSTGRES_PASSWORD:-}" ]]; then
+  IDENTITY_EXPECTED=1
+fi
 
 log() { echo "[backup] $*"; }
 
@@ -91,7 +102,6 @@ finish() {
     remote_enabled="$(carried_over signara_backup_remote_enabled)"
     remote_success="$(carried_over signara_backup_remote_last_success_timestamp)"
     remote_offhost="$(carried_over signara_backup_mirror_offhost)"
-    identity_expected="$(carried_over signara_backup_identity_expected)"
     identity_covered="$(carried_over signara_backup_identity_covered)"
     {
       echo "signara_backup_last_status 0"
@@ -99,7 +109,10 @@ finish() {
       [[ -n "$remote_enabled" ]] && echo "signara_backup_remote_enabled $remote_enabled"
       [[ -n "$remote_success" ]] && echo "signara_backup_remote_last_success_timestamp $remote_success"
       [[ -n "$remote_offhost" ]] && echo "signara_backup_mirror_offhost $remote_offhost"
-      [[ -n "$identity_expected" ]] && echo "signara_backup_identity_expected $identity_expected"
+      # Configuration, not the last good run: this run's IDENTITY_EXPECTED is a
+      # fact about the deployment even when the run itself failed, so it is
+      # published from here rather than carried over.
+      echo "signara_backup_identity_expected $IDENTITY_EXPECTED"
       [[ -n "$identity_covered" ]] && echo "signara_backup_identity_covered $identity_covered"
     } > "$STATUS_FILE"
     log "backup failed (exit $code)" >&2
@@ -122,8 +135,7 @@ backup_database() {
 backup_database "db" "${POSTGRES_HOST:-postgres}" "${POSTGRES_USER:-signara}" \
   "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}" "${POSTGRES_DB:-signara}"
 
-if [[ -n "${AUTHENTIK_POSTGRES_PASSWORD:-}" ]]; then
-  IDENTITY_EXPECTED=1
+if [[ "$IDENTITY_EXPECTED" == 1 ]]; then
   backup_database "authentik-db" "${AUTHENTIK_POSTGRES_HOST:-authentik-db}" \
     "${AUTHENTIK_POSTGRES_USER:-authentik}" "$AUTHENTIK_POSTGRES_PASSWORD" \
     "${AUTHENTIK_POSTGRES_DB:-authentik}"
