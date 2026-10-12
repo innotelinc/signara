@@ -114,16 +114,40 @@ docker compose -f docker-compose.prod.yml -f docker-compose.override.prod.yml \
   --profile monitoring up -d prometheus alertmanager backup backup-metrics
 ```
 
-Prometheus and Alertmanager are published on **loopback only**. Neither has
-authentication, and Prometheus's query API plus Alertmanager's silence/alert list
-expose everything the stack collects, so they are deliberately not reachable from
-the network; reach them with an SSH tunnel (`ssh -L 9090:127.0.0.1:9090 …`) rather
-than through the edge.
+Prometheus and Alertmanager are published on **loopback only** by default.
+Neither has authentication, and Prometheus's query API plus Alertmanager's
+silence/alert list expose everything the stack collects, so they are deliberately
+not reachable from the network; reach them with an SSH tunnel
+(`ssh -L 9090:127.0.0.1:9090 …`) rather than through the edge. The one exception
+to watch for is Alertmanager's bind address — a mail link is built from
+`--web.external-url`, so publishing the port on the LAN is what makes a LAN link
+there honest (see below).
 
-Alerts are delivered to `ALERT_EMAIL_TO` over the same mail identity the app's
-notification workers use (`SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/`SMTP_PASS`). If
-those are unset the stack still evaluates rules and shows them in the Alertmanager
-UI, and the container says so at start — but nobody is told, so set them.
+**Critical** alerts are mailed to `ALERT_EMAIL_TO` over the same mail identity the
+app's notification workers use (`SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/`SMTP_PASS`).
+A `warning` is evaluated and stays visible in the Alertmanager UI, but it is not
+mailed: the route sends `severity = warning` to the `silent` receiver, because the
+estate's periodic probes all fire as warnings and mailing each one trained the
+reader to ignore the mailbox. If the SMTP variables are unset the stack still
+evaluates rules and shows them in the UI, and the container says so at start — but
+nobody is told, so set them.
+
+What the mail *says* comes from templates, not from Alertmanager's default body —
+that default prints a bare `Labels` / `Annotations` dump and a `Source:` line,
+which is what the estate's delivery-probe mail was arriving as.
+`infra/monitoring/alertmanager/email.tmpl` is mounted read-only at
+`/etc/alertmanager/email.tmpl` and referenced from `alertmanager.yml` (the
+`templates:` list, plus the receiver's `html`, `text` and `Subject`): severity and
+alert name in the subject, one block per alert, and a link back to the UI.
+
+That link is built from `--web.external-url`. Left unset, Alertmanager advertises
+the container's own hostname (`http://<container-id>:9093`), which resolves for
+nobody; `docker-compose.prod.yml` passes `ALERTMANAGER_EXTERNAL_URL` (default
+`http://192.168.1.44:9093`). Keep it in step with `ALERTMANAGER_BIND_ADDRESS`: the
+compose default publishes 9093 on **loopback only**, so a link to the LAN address
+resolves only while the port is published on it — this deployment sets
+`ALERTMANAGER_BIND_ADDRESS=0.0.0.0` for exactly that reason, accepting that the
+silence/alert list is then reachable from the LAN.
 
 Alertmanager also has to say *who* it is: it speaks `EHLO` with the container's
 hostname, which Go defaults to `localhost`, and a strict relay refuses a
@@ -146,9 +170,11 @@ critical alerts were addressed to nowhere.
 
 The estate resolves this with its **own** mail server rather than an external
 relay: Stalwart on `192.168.1.15`, which the other stacks use too. Point
-`SMTP_HOST`/`SMTP_PORT` at it (`192.168.1.15:25`), leave `SMTP_USER`/`SMTP_PASS`
-empty — it accepts LAN senders unauthenticated — and set `ALERT_EMAIL_TO` to a
-mailbox on a domain it serves (`admin@innotel.us`). Its certificate is
+`SMTP_HOST`/`SMTP_PORT` at its submission port (`192.168.1.15:587`) and set
+`SMTP_USER`/`SMTP_PASS` to a mailbox it serves — this deployment uses
+`alertmanager@innotel.us` — with `ALERT_EMAIL_TO` also on a domain it serves
+(`admin@innotel.us`). Authentication over `STARTTLS` is what that port expects;
+both the handshake and the login were confirmed against it. Its certificate is
 self-signed and names no address, so this deployment also sets
 `SMTP_TLS_INSECURE=true`: `STARTTLS` still encrypts the hop, but Alertmanager
 cannot verify the certificate and refuses to send until told to skip it.

@@ -362,6 +362,14 @@ services:
     # itself, so the entrypoint renders it before exec'ing the binary — without
     # that step the receiver silently sends nowhere. See the script's header.
     entrypoint: ['/bin/sh', '/etc/alertmanager/entrypoint.sh']
+    # The address Alertmanager advertises in every notification link. Left
+    # unset it uses the container's own hostname on :9093
+    # (http://<container-id>:9093), which resolves for nobody — that was the
+    # link in the estate's delivery-probe mail. Set it in .env; the LAN
+    # address is the default because the monitoring UIs are not published
+    # through the Cerulean edge.
+    command:
+      - '--web.external-url=${ALERTMANAGER_EXTERNAL_URL:-http://192.168.1.44:9093}'
     environment:
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
@@ -380,6 +388,7 @@ services:
     volumes:
       - ./infra/monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
       - ./infra/monitoring/alertmanager/entrypoint.sh:/etc/alertmanager/entrypoint.sh:ro
+      - ./infra/monitoring/alertmanager/email.tmpl:/etc/alertmanager/email.tmpl:ro
       - alertdata:/alertmanager
     ports:
       - '${ALERTMANAGER_BIND_ADDRESS:-127.0.0.1}:${ALERTMANAGER_BIND_PORT:-9093}:9093'

@@ -23,17 +23,28 @@ global:
   smtp_auth_password: '${SMTP_PASS}'
   smtp_require_tls: true
 
+# Notification body. Without this Alertmanager sends its default email — a bare
+# `Labels` / `Annotations` dump and a `Source:` line — which is what the estate's
+# delivery-probe mail looked like. The templates live beside this file and are
+# mounted at /etc/alertmanager/email.tmpl (docker-compose.prod.yml).
+templates:
+  - '/etc/alertmanager/email.tmpl'
+
 route:
   receiver: email
   group_by: ['alertname', 'cluster', 'service']
   group_wait: 30s
   group_interval: 5m
   repeat_interval: 4h
-  # Severity is carried in the subject line rather than split into separate
-  # routes: the per-severity receivers this replaced pointed at
-  # platform-critical@/platform@ mailboxes that do not exist, so critical alerts
-  # were being addressed to nowhere. Add a route here when there are two real
-  # destinations to send them to.
+  # Warnings are evaluated and stay visible in the UI, but they are not mailed:
+  # the estate's periodic probes (`estate-check`, the Alertmanager delivery
+  # probe) all fire as `severity=warning`, and mailing every one of them trained
+  # the reader to ignore the mailbox. Only `critical` still pages — an alert that
+  # matches no sub-route keeps the top-level `email` receiver.
+  routes:
+    - matchers:
+        - severity = warning
+      receiver: silent
 
 receivers:
   - name: email
@@ -50,10 +61,17 @@ receivers:
         tls_config:
           insecure_skip_verify: ${SMTP_TLS_INSECURE}
         send_resolved: true
+        # The body and subject the reader actually gets: severity and alert name
+        # in the subject, one block per alert, and a link back to the UI built
+        # from --web.external-url.
+        html: '{{ template "signara.email.html" . }}'
+        text: '{{ template "signara.email.text" . }}'
         headers:
-          Subject: >-
-            {{ if eq .Status "firing" }}[{{ .CommonLabels.severity | toUpper }}]{{ else }}[resolved]{{ end }}
-            {{ .CommonLabels.alertname }}
+          Subject: '{{ template "signara.email.subject" . }}'
+
+  # Routes to here notify nobody — the receiver carries no integration configs.
+  # That is what keeps a warning in the UI without sending mail for it.
+  - name: silent
 
 inhibit_rules:
   - source_matchers: ['severity = critical']

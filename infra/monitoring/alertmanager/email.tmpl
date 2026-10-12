@@ -1,0 +1,67 @@
+{{- /*
+  Signara / Monarch alert email.
+
+  Installed at /etc/alertmanager/email.tmpl and referenced from alertmanager.yml
+  (`templates:`, plus the receiver's html/text/Subject). It replaces
+  Alertmanager's default body, which prints a bare `Labels` / `Annotations` dump
+  and a `Source:` line carrying whatever --web.external-url said — the estate's
+  delivery-probe mail was reading exactly like that. A reader now gets a subject
+  with the severity and the alert name, a sentence per alert, and one working
+  link back to the UI.
+*/ -}}
+
+{{- define "signara.email.subject" -}}
+{{- $sev := "" }}{{ with .CommonLabels.severity }}{{ $sev = . | toUpper }}{{ end -}}
+{{- if eq .Status "firing" -}}
+{{- if $sev }}[{{ $sev }}] {{ else }}[FIRING] {{ end -}}
+{{ .CommonLabels.alertname }}{{ if gt (len .Alerts.Firing) 1 }} — {{ len .Alerts.Firing }} alerts{{ end }}
+{{- else -}}
+[RESOLVED] {{ .CommonLabels.alertname }}
+{{- end -}}
+{{- end }}
+
+{{- define "signara.email.text" -}}
+{{ .Status | toUpper }}{{ if .CommonLabels.severity }} · {{ .CommonLabels.severity }}{{ end }}{{ with .CommonLabels.service }} · {{ . }}{{ end }} — {{ .CommonLabels.alertname }}
+
+{{ range .Alerts -}}
+{{ if .Annotations.summary }}{{ .Annotations.summary }}
+{{ end }}{{ if .Annotations.description }}{{ .Annotations.description }}
+{{ end }}{{ if .Labels.service }}service: {{ .Labels.service }}
+{{ end }}{{ if .StartsAt }}since: {{ .StartsAt.Format "2006-01-02 15:04:05 MST" }}
+{{ end }}
+{{ end -}}
+
+View in Alertmanager: {{ .ExternalURL }}
+{{- end }}
+
+{{- define "signara.email.html" -}}
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:24px;background:#0b0d12;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#e8e6e1;">
+  <div style="max-width:640px;margin:0 auto;background:#131722;border:1px solid #2a2f3a;border-radius:10px;overflow:hidden;">
+    <div style="padding:16px 20px;border-bottom:1px solid #2a2f3a;">
+      <div style="font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:#c8a96a;">Monarch · Estate Monitoring</div>
+      <div style="font-size:19px;font-weight:600;margin-top:6px;">
+        {{ if eq .Status "firing" }}<span style="color:#e0654f;">&#9679; Firing</span>{{ else }}<span style="color:#5fbf7f;">&#10003; Resolved</span>{{ end }}
+        <span>{{ .CommonLabels.alertname }}</span>
+      </div>
+      {{ with .CommonLabels.severity }}<div style="color:#9aa2b1;font-size:13px;margin-top:4px;">severity: {{ . }}{{ with $.CommonLabels.service }} &middot; service: {{ . }}{{ end }}</div>{{ end }}
+    </div>
+    {{ range .Alerts }}
+    <div style="padding:14px 20px;border-bottom:1px solid #212734;">
+      <div style="font-weight:600;margin-bottom:4px;">{{ .Labels.alertname }}</div>
+      {{ with .Annotations.summary }}<div style="font-size:14px;">{{ . }}</div>{{ end }}
+      {{ with .Annotations.description }}<div style="font-size:13px;color:#9aa2b1;margin-top:4px;">{{ . }}</div>{{ end }}
+      <div style="font-size:12px;color:#7f8794;margin-top:8px;">
+        {{ with .Labels.severity }}severity {{ . }}{{ end }}{{ with .Labels.service }} &middot; service {{ . }}{{ end }}{{ if .StartsAt }} &middot; since {{ .StartsAt.Format "2006-01-02 15:04 MST" }}{{ end }}
+      </div>
+    </div>
+    {{ end }}
+    <div style="padding:14px 20px;font-size:13px;">
+      <a href="{{ .ExternalURL }}" style="color:#c8a96a;text-decoration:none;">Open in Alertmanager &rarr;</a>
+    </div>
+  </div>
+</body>
+</html>
+{{- end }}
