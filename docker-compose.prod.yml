@@ -354,6 +354,10 @@ services:
       # `550 5.5.0 Invalid EHLO domain`; the entrypoint defaults it to a dotted
       # name when empty.
       SMTP_HELLO: ${SMTP_HELLO:-signara.innotel.us}
+      # The name the relay's certificate is verified against. Set it when the
+      # relay is dialled by an address its certificate does not name; that keeps
+      # verification on instead of reaching for the switch below.
+      SMTP_TLS_SERVERNAME: ${SMTP_TLS_SERVERNAME:-}
       # `true` keeps STARTTLS but skips verifying the relay's certificate; set
       # it for an internal relay reached by IP with a self-signed certificate.
       SMTP_TLS_INSECURE: ${SMTP_TLS_INSECURE:-false}

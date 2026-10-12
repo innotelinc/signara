@@ -92,15 +92,37 @@ export default () => ({
     secure: process.env.SMTP_SECURE, // 'true' = implicit TLS (SMTPS); unset → port 465 implies TLS
     user: process.env.SMTP_USER ?? '',
     pass: process.env.SMTP_PASS ?? '',
-    from: process.env.SMTP_FROM ?? 'Signara <no-reply@signara.innotel.us>',
-    // The relay is reached by its LAN address while its certificate names a host,
-    // so verification refuses it outright: "Hostname/IP does not match
-    // certificate's altnames: IP: 192.168.1.15 is not in the cert's list". That
-    // refused **every** product mail — invitations, reminders, completion
-    // notices — while the alert path kept working, because Alertmanager already
-    // has this switch and the mailer had no equivalent for it. Off unless the
-    // deployment says otherwise: skipping verification is a statement about one
-    // relay, not a default for any SMTP host.
+    // The product's own sender identity. SMTP_FROM cannot serve both jobs: it is
+    // the mailbox Alertmanager sends as (the alerts address), and an invitation
+    // arriving from "Signara Alerts <alertmanager@…>" is the wrong artefact
+    // under the right transport. SMTP_PRODUCT_FROM is therefore its own key; the
+    // fallback to SMTP_FROM keeps a deployment that has only ever set one
+    // variable sending from its configured address rather than from a default
+    // nobody authorised.
+    from:
+      process.env.SMTP_PRODUCT_FROM ??
+      process.env.SMTP_FROM ??
+      'Signara <no-reply@signara.innotel.us>',
+    // The envelope sender (SMTP MAIL FROM), which is not the same thing as the
+    // From header. A relay that authenticates a user generally refuses an
+    // envelope it did not authenticate — Stalwart answers `501 5.5.4 You are not
+    // allowed to send from this address` — and nodemailer derives the envelope
+    // from `from` unless told otherwise. So when the product From is its own
+    // address, this must stay the authenticated mailbox or every signing mail is
+    // refused. Defaults to SMTP_USER, which is the only sender such a relay
+    // accepts; set it explicitly when the relay authorises a different one.
+    envelopeFrom: process.env.SMTP_ENVELOPE_FROM ?? process.env.SMTP_USER ?? '',
+    // The name the relay's certificate is verified against (and the SNI offered).
+    // A relay dialled by its LAN address whose certificate names a host fails
+    // verification outright: "Hostname/IP does not match certificate's
+    // altnames". Naming the certificate here fixes that with verification ON —
+    // `tls.rejectUnauthorized` stays at its default — so this is the setting to
+    // prefer over tlsInsecure below.
+    tlsServername: process.env.SMTP_TLS_SERVERNAME ?? '',
+    // Skipping verification altogether. Off unless the deployment asks for it
+    // explicitly: it is a statement about one relay's certificate, not a
+    // sensible default for any SMTP host, and it is the weaker answer to the
+    // same problem tlsServername solves above.
     tlsInsecure: process.env.SMTP_TLS_INSECURE === 'true',
   },
   monitoring: {

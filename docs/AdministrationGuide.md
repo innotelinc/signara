@@ -207,8 +207,10 @@ Where it shows up:
 
 - **Email** — invitation, reminder and completion mail render the header, button
   colour and footer from the tenant's branding (`BrandingService.forOrganization`
-  resolved in `EmailService`). The **`From` address never changes**: it stays the
-  deployment's `SMTP_FROM` so SPF/DKIM/DMARC keep aligning (see #83).
+  resolved in `EmailService`). The **`From` address never changes per tenant**:
+  it stays the deployment's product identity (`SMTP_PRODUCT_FROM`, falling back
+  to `SMTP_FROM`) so SPF/DKIM/DMARC keep aligning — and it is not the alerts
+  mailbox, so a signer's invitation is not a system notice (see #83).
 - **The signing page** — `GET /signatures/public/:token` returns a `branding`
   object; the page renders the logo, name and tagline above the document.
 - **The evidence report** — a `branding` object rides with the report, so a

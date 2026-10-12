@@ -28,11 +28,20 @@ warn() { echo "alertmanager-entrypoint: $*" >&2; }
 # `550 5.5.0 Invalid EHLO domain` — so default to a dotted name rather than
 # leaving Go's `localhost` in place.
 : "${SMTP_HELLO:=signara.innotel.us}"
+# The name the relay's certificate is verified against, and the SNI offered.
+# Required when the relay is dialled by its address and its certificate names a
+# host: with it unset and verification on, the dialled address is what gets
+# checked and the handshake fails.
+: "${SMTP_TLS_SERVERNAME:=}"
 # Whether to skip verifying the relay's TLS certificate. Only ever `true` or
 # `false`, and validated below: it is substituted unquoted so Alertmanager
 # parses a YAML boolean, and anything else would be a config that does not
 # load.
 : "${SMTP_TLS_INSECURE:=false}"
+
+if [ -z "$SMTP_TLS_SERVERNAME" ] && [ "$SMTP_TLS_INSECURE" = "false" ]; then
+  warn 'SMTP_TLS_SERVERNAME is unset while verification is on: the relay address itself is what the certificate will be checked against. Set SMTP_TLS_SERVERNAME (or SMTP_TLS_INSECURE=true) if the certificate names a host rather than that address.'
+fi
 
 if [ -z "$SMTP_HOST" ]; then
   # Falling back to the host's own MTA keeps the config parseable and the UI
@@ -73,6 +82,7 @@ sed \
   -e "s|\${SMTP_PASS}|$(escape "$SMTP_PASS")|g" \
   -e "s|\${SMTP_FROM}|$(escape "$SMTP_FROM")|g" \
   -e "s|\${SMTP_HELLO}|$(escape "$SMTP_HELLO")|g" \
+  -e "s|\${SMTP_TLS_SERVERNAME}|$(escape "$SMTP_TLS_SERVERNAME")|g" \
   -e "s|\${SMTP_TLS_INSECURE}|$(escape "$SMTP_TLS_INSECURE")|g" \
   -e "s|\${ALERT_EMAIL_TO}|$(escape "$ALERT_EMAIL_TO")|g" \
   "$template" > "$rendered"

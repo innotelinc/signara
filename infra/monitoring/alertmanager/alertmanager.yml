@@ -7,8 +7,13 @@
 # password. `amtool check-config` reports SUCCESS on such a file, which is how
 # this silently shipped: a receiver that looks configured, validates, and
 # delivers nowhere. Configure the relay in .env (SMTP_HOST/SMTP_PORT/SMTP_USER/
-# SMTP_PASS, the same mail identity the app's notification workers use) and set
-# ALERT_EMAIL_TO to a mailbox somebody actually reads.
+# SMTP_PASS) and set ALERT_EMAIL_TO to a mailbox somebody actually reads.
+#
+# The *transport* is shared with the app — one relay, one login — but the sender
+# is not: SMTP_FROM below is the alerts identity, and the API sends product mail
+# under its own address (SMTP_PRODUCT_FROM, see docs/Deployment.md §Monitoring
+# and alerts). Alertmanager cannot use that address: the relay authorises one
+# envelope per login, and this receiver's is the login itself.
 #
 # `hello` is not optional when the relay is a real MTA: Alertmanager says EHLO
 # with the container's own hostname (Go's net/smtp defaults it to `localhost`),
@@ -52,13 +57,19 @@ receivers:
       - to: '${ALERT_EMAIL_TO}'
         hello: '${SMTP_HELLO}'
         # Alertmanager verifies the relay's certificate against the address it
-        # dialled. An internal relay reached by IP with a self-signed
-        # certificate (Stalwart here presents `rcgen self signed cert`, SAN
-        # `localhost`) cannot satisfy that, so the opt-out is explicit rather
-        # than a silent drop to plaintext: SMTP_TLS_INSECURE=true keeps
-        # STARTTLS and skips verification. Leave it false for a relay with a
-        # certificate that names the address.
+        # dialled — so a relay reached by its LAN address whose certificate
+        # names a host (`192.168.1.15` vs. `*.innotel.us`) fails verification,
+        # with the certificate itself perfectly valid. `server_name` is the fix
+        # that keeps verification ON: it is what the certificate is checked
+        # against, and the SNI we offer. The API has the same switch for product
+        # mail (SMTP_TLS_SERVERNAME), deliberately: neither service should be
+        # able to force the other into the weaker setting.
+        #
+        # insecure_skip_verify drops the check altogether and is the fallback,
+        # kept because a relay with a self-signed certificate cannot be named
+        # into validity. Prefer server_name.
         tls_config:
+          server_name: '${SMTP_TLS_SERVERNAME}'
           insecure_skip_verify: ${SMTP_TLS_INSECURE}
         send_resolved: true
         # The body and subject the reader actually gets: severity and alert name

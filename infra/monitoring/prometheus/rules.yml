@@ -59,14 +59,27 @@ groups:
 
   - name: signara-queues
     rules:
+      # `sum(bullmq_queue_failed_count) > 10` latched, and that was the rule's
+      # whole failure mode: the gauge counts jobs that are *retained* in the
+      # failed set, so a backlog nobody had cleared kept it firing forever, and
+      # the failures it was hiding (two real `send-signing-reminder` ones behind
+      # 39 settled sweep jobs) could not be seen through it. Reading the same
+      # gauge's *increase* reports jobs that actually entered the failed set in
+      # the window — the thing worth a person's attention — and resolves on its
+      # own once failures stop, with clearing the backlog a runbook step
+      # (docs/Deployment.md §Operations) rather than a condition of silence.
+      # increase() is the right function despite the series being a gauge: the
+      # value only ever grows until someone clears it, which is exactly the
+      # shape increase() treats as a count.
       - alert: QueueFailuresHigh
-        expr: sum(bullmq_queue_failed_count) > 10
+        expr: sum(increase(bullmq_queue_failed_count[6h])) > 10
         for: 10m
         labels:
           severity: warning
           team: platform
         annotations:
-          summary: 'BullMQ failed-job backlog is high'
+          summary: 'BullMQ failed-job backlog is growing'
+          description: '{{ $value | humanize }} jobs entered the failed set in the last 6 hours. Read the failure reasons and clear what is historical — docs/Deployment.md §Operations.'
 
       - alert: QueueStalled
         expr: bullmq_queue_waiting_count > 1000

@@ -48,6 +48,57 @@ describe('SMTP transport options', () => {
       else process.env.SMTP_TLS_INSECURE = saved;
     }
   });
+
+  /**
+   * SMTP_FROM is Alertmanager's sender, and product mail arriving from the
+   * alerts mailbox is the wrong artefact under the right transport, so the
+   * product identity has its own key. The envelope is separate again: a relay
+   * that authenticates a mailbox refuses an envelope it did not authenticate.
+   */
+  it('gives the product its own sender and envelope, defaulting the envelope to the login', () => {
+    const keys = ['SMTP_PRODUCT_FROM', 'SMTP_FROM', 'SMTP_ENVELOPE_FROM', 'SMTP_USER'] as const;
+    const saved = keys.map((key) => [key, process.env[key]] as const);
+    try {
+      for (const key of keys) delete process.env[key];
+      // Nothing set: the platform's own no-reply identity, and no envelope, so
+      // nodemailer's default (the From address) applies.
+      expect(configuration().smtp.from).toBe('Signara <no-reply@signara.innotel.us>');
+      expect(configuration().smtp.envelopeFrom).toBe('');
+
+      // A deployment that has only ever set SMTP_FROM keeps sending as it did
+      // rather than from an address nobody authorised.
+      process.env.SMTP_FROM = 'Signara Alerts <alertmanager@innotel.us>';
+      expect(configuration().smtp.from).toBe('Signara Alerts <alertmanager@innotel.us>');
+
+      // SMTP_PRODUCT_FROM wins, and the envelope follows the authenticated user
+      // unless the deployment names a different authorised sender.
+      process.env.SMTP_PRODUCT_FROM = 'Signara <no-reply@signara.innotel.us>';
+      process.env.SMTP_USER = 'alertmanager@innotel.us';
+      expect(configuration().smtp.from).toBe('Signara <no-reply@signara.innotel.us>');
+      expect(configuration().smtp.envelopeFrom).toBe('alertmanager@innotel.us');
+
+      process.env.SMTP_ENVELOPE_FROM = 'signing@innotel.us';
+      expect(configuration().smtp.envelopeFrom).toBe('signing@innotel.us');
+    } finally {
+      for (const [key, value] of saved) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  });
+
+  it('reads the relay TLS name from SMTP_TLS_SERVERNAME, empty by default', () => {
+    const saved = process.env.SMTP_TLS_SERVERNAME;
+    try {
+      delete process.env.SMTP_TLS_SERVERNAME;
+      expect(configuration().smtp.tlsServername).toBe('');
+      process.env.SMTP_TLS_SERVERNAME = 'innotel.us';
+      expect(configuration().smtp.tlsServername).toBe('innotel.us');
+    } finally {
+      if (saved === undefined) delete process.env.SMTP_TLS_SERVERNAME;
+      else process.env.SMTP_TLS_SERVERNAME = saved;
+    }
+  });
 });
 
 describe('CORS origin allowlist', () => {

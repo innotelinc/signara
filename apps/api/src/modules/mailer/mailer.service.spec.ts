@@ -150,6 +150,75 @@ describe('EmailService', () => {
     );
   });
 
+  it('names the relay certificate (SMTP_TLS_SERVERNAME) instead of skipping verification', async () => {
+    const createTransport = nodemailer.createTransport as unknown as jest.Mock;
+    const message = { to: 'signer@signara.local', subject: 'Hi', html: '<p>hi</p>' };
+
+    // The preferred answer to "dialled by IP, certificate names a host": offer
+    // the certificate's name and verify it. Skipping verification must not come
+    // along for the ride.
+    createTransport.mockClear();
+    await (await build({ 'smtp.host': '192.168.1.15', 'smtp.tlsServername': 'innotel.us' }))
+      .get(EmailService)
+      .send(message);
+    expect(createTransport).toHaveBeenCalledWith(
+      expect.objectContaining({ tls: { servername: 'innotel.us' } }),
+    );
+
+    // Both switches together stay explicit: insecure is still honoured when the
+    // deployment asks for it, and never added when it does not.
+    createTransport.mockClear();
+    await (
+      await build({
+        'smtp.host': '192.168.1.15',
+        'smtp.tlsServername': 'innotel.us',
+        'smtp.tlsInsecure': true,
+      })
+    )
+      .get(EmailService)
+      .send(message);
+    expect(createTransport).toHaveBeenCalledWith(
+      expect.objectContaining({ tls: { servername: 'innotel.us', rejectUnauthorized: false } }),
+    );
+  });
+
+  it('envelopes from the authenticated mailbox when the product From is its own address', async () => {
+    const createTransport = nodemailer.createTransport as unknown as jest.Mock;
+    const sendMail = jest.fn().mockResolvedValue({ messageId: 'test' });
+    createTransport.mockImplementation(() => ({ sendMail }));
+    const message = { to: 'signer@signara.local', subject: 'Hi', html: '<p>hi</p>' };
+
+    // Stalwart refuses an envelope it did not authenticate (`501 5.5.4 You are
+    // not allowed to send from this address`), so the header and the envelope
+    // are deliberately different: the signer sees no-reply@signara.innotel.us,
+    // the relay authorises alertmanager@innotel.us.
+    await (
+      await build({
+        'smtp.host': '192.168.1.15',
+        'smtp.from': 'Signara <no-reply@signara.innotel.us>',
+        'smtp.envelopeFrom': 'alertmanager@innotel.us',
+      })
+    )
+      .get(EmailService)
+      .send(message);
+    expect(sendMail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        from: 'Signara <no-reply@signara.innotel.us>',
+        envelope: { from: 'alertmanager@innotel.us' },
+      }),
+    );
+
+    // With no envelope configured, nodemailer's own behaviour applies (it uses
+    // the From address) — the option must not be sent as an empty envelope.
+    sendMail.mockClear();
+    await (await build({ 'smtp.host': '192.168.1.15' }))
+      .get(EmailService)
+      .send(message);
+    expect(sendMail).toHaveBeenCalledWith(
+      expect.not.objectContaining({ envelope: expect.anything() }),
+    );
+  });
+
   it('sends the completion mail From the deployment identity, not a per-tenant one', async () => {
     const moduleRef = await build({
       'smtp.from': 'Signara by Innotel <no-reply@signara.innotel.us>',

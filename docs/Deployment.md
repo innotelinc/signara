@@ -99,6 +99,40 @@ topology, and a bare `up -d` silently undoes two things at once:
 A container keeps its old config if a command does not recreate it, so this is
 easy to miss: the damage only shows up on the _next_ recreate of that service.
 
+#### Failed queue jobs
+
+`QueueFailuresHigh` fires when more than 10 jobs enter a queue's failed set within
+six hours, and it resolves by itself once they stop. That is deliberate: the gauge
+it reads (`bullmq_queue_failed_count`, published by the API's queue-metrics poll)
+counts jobs **retained** in the failed set, so the count only falls when someone
+clears it — and an alert that needs manual clearing to go quiet is an alert that
+keeps crying wolf after the problem is fixed. Clearing is a review step, not a
+condition for silence:
+
+```bash
+REDIS_PASSWORD="$(grep '^REDIS_PASSWORD=' .env | cut -d= -f2-)"
+
+# 1. Read it. Every failed job carries its reason, and the reason is the point:
+#    on 2026-10-12 two real `send-signing-reminder` failures (the relay's
+#    certificate, so *every* signing mail) sat behind 39 settled `sweep-reminders`
+#    jobs from an older build, and "41 failed" as a bare count hid them.
+$COMPOSE exec redis redis-cli -a "$REDIS_PASSWORD" --no-auth-warning \
+  ZRANGE bull:signing:failed 0 -1 | while read -r id; do
+    printf '%s: ' "$id"
+    $COMPOSE exec -T redis redis-cli -a "$REDIS_PASSWORD" --no-auth-warning \
+      HGET "bull:signing:$id" failedReason
+  done
+
+# 2. Then clear what is historical — one key per queue (`signing`,
+#    `notifications`, `audit`). The gauge follows within a poll interval.
+$COMPOSE exec redis redis-cli -a "$REDIS_PASSWORD" --no-auth-warning DEL bull:signing:failed
+```
+
+Clearing is not data loss: the jobs are already failed, and their effect — the
+`Notification` row marked `FAILED`, the log line, the metric — is the record that
+matters. What clearing buys is a gauge that means "this many jobs are failing
+now" rather than "this many have ever failed".
+
 All Compose services include health checks, restart policies, resource limits,
 and bounded JSON logging. The API waits for PostgreSQL, Redis, and Meilisearch
 before becoming ready — deliberately **not** on the object store, so that the
@@ -123,8 +157,20 @@ to watch for is Alertmanager's bind address — a mail link is built from
 `--web.external-url`, so publishing the port on the LAN is what makes a LAN link
 there honest (see below).
 
-**Critical** alerts are mailed to `ALERT_EMAIL_TO` over the same mail identity the
-app's notification workers use (`SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/`SMTP_PASS`).
+**Critical** alerts are mailed to `ALERT_EMAIL_TO` over the same relay and login the
+app's notification workers use (`SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/`SMTP_PASS`) —
+but *not* the same sender. `SMTP_FROM` is the alerts identity and belongs to
+Alertmanager; product mail (invitations, reminders, completion notices) sends as
+`SMTP_PRODUCT_FROM`, which defaults to `Signara <no-reply@signara.innotel.us>`, or
+to `SMTP_FROM` when it is unset. The two are deliberately separate variables: one
+address serving both streams means a signer's invitation arrives from the alerts
+mailbox and their replies land there, which is the thing `b5e0b65` set out to
+avoid. Where a relay authorises only the mailbox it authenticated, the header and
+the envelope differ on purpose — `SMTP_PRODUCT_FROM` is what the signer sees,
+`SMTP_ENVELOPE_FROM` (default: `SMTP_USER`) is what the relay accepts — and
+setting the envelope to anything the relay did not authenticate gets every
+signing mail refused with `501 5.5.4 You are not allowed to send from this
+address`.
 A `warning` is evaluated and stays visible in the Alertmanager UI, but it is not
 mailed: the route sends `severity = warning` to the `silent` receiver, because the
 estate's periodic probes all fire as warnings and mailing each one trained the
@@ -155,12 +201,27 @@ single-label name (`Stalwart` answers `550 5.5.0 Invalid EHLO domain`). Set
 `SMTP_HELLO` to a dotted FQDN (it defaults to `signara.innotel.us`) or delivery
 fails after a connection that otherwise looks healthy.
 
-If the relay offers `STARTTLS` with a certificate that does not name the
-address dialled — an internal relay reached by IP, typically self-signed —
-Alertmanager refuses it (`x509: cannot validate certificate for <ip>`). Set
-`SMTP_TLS_INSECURE=true` to keep `STARTTLS` and skip verification; leave it
-unset for a relay with a real certificate. Prefer the certificate over this
-switch when you have the choice.
+If the relay offers `STARTTLS` with a certificate that does not name the address
+dialled — an internal relay reached by IP, typically — the client refuses it
+(`x509: cannot validate certificate for <ip>`, or nodemailer's "Hostname/IP does
+not match certificate's altnames"). There are two answers and they are not
+equivalent:
+
+- `SMTP_TLS_SERVERNAME` names the certificate (and is the SNI offered), so the
+  handshake is verified against the name the relay actually presents. This is
+  the one to prefer, and it is what this deployment uses: Stalwart is reached at
+  `192.168.1.15` while its certificate covers `*.innotel.us` and chains to a
+  public CA, so naming it restores a *verified* connection.
+- `SMTP_TLS_INSECURE=true` keeps `STARTTLS` and skips verification. It is the
+  fallback for a relay whose certificate cannot be named into validity
+  (self-signed, naming no address), not a way to make a template variable go
+  away.
+
+Both are read by the API *and* by Alertmanager, but they are configured per
+service on purpose: the API deciding to skip verification for product mail says
+nothing about the alert path, and vice versa. `SMTP_TLS_INSECURE=false` with an
+empty `SMTP_TLS_SERVERNAME` and a relay dialled by IP is a config that will
+refuse to send — the Alertmanager entrypoint warns about exactly that at start.
 
 Note which relay you can actually use: hosts that block outbound port 25 cannot
 deliver mail directly to a recipient's MX, so this needs an **authenticated relay
@@ -174,10 +235,22 @@ relay: Stalwart on `192.168.1.15`, which the other stacks use too. Point
 `SMTP_USER`/`SMTP_PASS` to a mailbox it serves — this deployment uses
 `alertmanager@innotel.us` — with `ALERT_EMAIL_TO` also on a domain it serves
 (`admin@innotel.us`). Authentication over `STARTTLS` is what that port expects;
-both the handshake and the login were confirmed against it. Its certificate is
-self-signed and names no address, so this deployment also sets
-`SMTP_TLS_INSECURE=true`: `STARTTLS` still encrypts the hop, but Alertmanager
-cannot verify the certificate and refuses to send until told to skip it.
+both the handshake and the login were confirmed against it. Its certificate is a
+real one covering `*.innotel.us` (measured 2026-10-12, after the relay replaced
+its earlier self-signed certificate), so this deployment sets
+`SMTP_TLS_SERVERNAME=innotel.us` and verifies: the connection is to a LAN
+address, but the certificate is checked against the name it presents. A relay
+whose certificate genuinely cannot be named — self-signed, naming no address —
+is the only case for `SMTP_TLS_INSECURE=true`.
+
+Stalwart also authorises the *envelope* per authenticated mailbox: it answers
+`501 5.5.4 You are not allowed to send from this address` for a `MAIL FROM` it
+did not authenticate. That is why the product's own sender is expressed as a
+header (`SMTP_PRODUCT_FROM`), with `SMTP_ENVELOPE_FROM` staying the mailbox the
+deployment logs in as. Giving the product a submission account of its own — a
+`signara.innotel.us` mailbox, the domain already carrying its own DKIM keys —
+would let the envelope match the header, and is the next step if the sender
+identity ever needs to survive a change of relay.
 
 `infra/monitoring/alertmanager/alertmanager.yml` is a template: Alertmanager has
 no environment expansion, so `entrypoint.sh` substitutes it at container start and
@@ -424,7 +497,11 @@ keys are verified against their certificates before storage.
 
 SMTP configuration is optional in local development. Set `SMTP_HOST`,
 `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, and `SMTP_FROM` to enable
-invitation, reminder, and notification delivery.
+invitation, reminder, and notification delivery. `SMTP_PRODUCT_FROM` (default:
+`Signara <no-reply@signara.innotel.us>`) is the address signers see, and
+`SMTP_ENVELOPE_FROM` (default: `SMTP_USER`) is the envelope the relay authorises;
+`SMTP_TLS_SERVERNAME` names the relay's certificate when it is dialled by an
+address the certificate does not carry.
 
 ## 6. Upgrading an existing deployment
 

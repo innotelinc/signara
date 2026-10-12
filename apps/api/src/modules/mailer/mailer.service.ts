@@ -75,6 +75,20 @@ export class EmailService {
     return this.config.get<string>('smtp.from') ?? 'Signara <no-reply@signara.innotel.us>';
   }
 
+  /**
+   * The envelope sender (SMTP MAIL FROM), when the deployment names one.
+   *
+   * Kept separate from {@link from} because they are different fields: the
+   * header is what the signer sees, the envelope is what the relay authorises.
+   * A relay that authenticates a mailbox refuses an envelope it did not
+   * authenticate (Stalwart: `501 5.5.4 You are not allowed to send from this
+   * address`), so a deployment whose product From is `no-reply@…` must still
+   * envelope from the mailbox it logs in as.
+   */
+  envelopeFrom(): string | undefined {
+    return this.config.get<string>('smtp.envelopeFrom')?.trim() || undefined;
+  }
+
   /** Sends a signing invitation or reminder with the tenant's branding. */
   async sendSigningMail(ctx: SigningMailContext): Promise<boolean> {
     const { kind } = ctx;
@@ -86,9 +100,11 @@ export class EmailService {
 
   /**
    * Sends the completion email to the request's originator (issue #83). The
-   * `From` is the deployment identity (`from()`), deliberate: the retired
-   * platform sent this under the same SMTP identity, and keeping it stable is
-   * what keeps SPF/DKIM/DMARC aligned and the mail out of spam.
+   * `From` is the deployment's product identity (`from()`), not the tenant's and
+   * not the alerts mailbox: the retired platform's wording is kept, but the
+   * sender has to be the address this deployment is authorised to send as, which
+   * is what keeps SPF/DKIM/DMARC aligned and the mail out of spam. See
+   * {@link envelopeFrom} for the envelope half of that split.
    */
   async sendCompletionMail(ctx: CompletionMailContext): Promise<boolean> {
     const branding = await this.resolveBranding(ctx.organizationId);
@@ -131,8 +147,10 @@ export class EmailService {
     }
 
     const transporter = this.getTransporter();
+    const envelopeFrom = this.envelopeFrom();
     await transporter.sendMail({
       from: this.from(),
+      ...(envelopeFrom ? { envelope: { from: envelopeFrom } } : {}),
       to: message.to,
       subject: message.subject,
       html: message.html,
@@ -150,18 +168,26 @@ export class EmailService {
     const user = this.config.get<string>('smtp.user') ?? '';
     const pass = this.config.get<string>('smtp.pass') ?? '';
     const secure = this.config.get<string>('smtp.secure') === 'true' || port === 465;
-    // Only when the deployment asks for it (SMTP_TLS_INSECURE). A relay reached by
-    // address while its certificate names a host fails verification with
-    // "Hostname/IP does not match certificate's altnames", which is every
-    // invitation, reminder and completion mail — the alert path hid it, because
-    // Alertmanager has its own copy of this switch and kept sending.
+    // A relay reached by address while its certificate names a host fails
+    // verification with "Hostname/IP does not match certificate's altnames",
+    // which is every invitation, reminder and completion mail — the alert path
+    // hid it, because Alertmanager has its own copy of this switch and kept
+    // sending. Two answers, in order of preference:
+    //   - SMTP_TLS_SERVERNAME names the certificate (SNI + the verified name) and
+    //     leaves verification alone;
+    //   - SMTP_TLS_INSECURE drops verification, which is a statement about one
+    //     relay's certificate and off unless the deployment asks for it.
+    const tlsServername = this.config.get<string>('smtp.tlsServername')?.trim() ?? '';
     const tlsInsecure = this.config.get<boolean>('smtp.tlsInsecure') === true;
+    const tls: Record<string, unknown> = {};
+    if (tlsServername) tls.servername = tlsServername;
+    if (tlsInsecure) tls.rejectUnauthorized = false;
 
     this.transporter = nodemailer.createTransport({
       host: this.config.get<string>('smtp.host'),
       port,
       secure, // 465 = implicit TLS; else STARTTLS
-      ...(tlsInsecure ? { tls: { rejectUnauthorized: false } } : {}),
+      ...(Object.keys(tls).length > 0 ? { tls } : {}),
       ...(user && pass ? { auth: { user, pass } } : {}),
     });
     return this.transporter;
