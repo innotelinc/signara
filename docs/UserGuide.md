@@ -124,3 +124,8 @@ signers can no longer sign. Senders can re-issue a new request.
 
 **Can I sign on my phone?** Yes — the signing room is mobile-first and
 responsive.
+
+**Can I try a signing room before creating an account?** Yes — **Try a demo
+signing room** (or `/sign/demo`) is a sample request that runs entirely in your
+browser. Nothing is sent anywhere; it is a walkthrough of the room, not a real
+request.
