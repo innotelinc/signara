@@ -44,3 +44,18 @@ export const bullmqQueueFailed =
     help: 'Number of failed BullMQ jobs by queue',
     labelNames: ['queue'],
   });
+
+/**
+ * Documents Meilisearch refused to index or remove. Document writes must not
+ * fail because search is unavailable, so these are caught and logged — which is
+ * exactly how a *permanent* indexing failure stays invisible: the deployment
+ * looked healthy while the index held nothing and every search returned no
+ * results. Exported as a counter so that is a page, not a log line.
+ */
+export const searchIndexFailuresTotal =
+  (register.getSingleMetric('signara_search_index_failures_total') as Counter<string> | undefined) ??
+  new Counter({
+    name: 'signara_search_index_failures_total',
+    help: 'Document index operations (index/delete) Meilisearch rejected',
+    labelNames: ['operation'],
+  });

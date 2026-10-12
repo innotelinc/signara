@@ -1,5 +1,6 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { MeilisearchService } from '../../storage/meilisearch.service';
 import { AuthenticatedUser } from '../../common/types';
 
 /**
@@ -8,7 +9,10 @@ import { AuthenticatedUser } from '../../common/types';
  */
 @Injectable()
 export class AdminService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly meili: MeilisearchService,
+  ) {}
 
   private assertPlatformAdmin(user: AuthenticatedUser): void {
     if (user.platformRole !== 'PLATFORM_ADMIN') {
@@ -95,6 +99,65 @@ export class AdminService {
       await this.prisma.session.updateMany({ where: { userId: id }, data: { revokedAt: new Date() } });
     }
     return { id, status };
+  }
+
+  /**
+   * Rebuilds the document search index from the database.
+   *
+   * Indexing is driven by document writes (`DocumentsService` calls `indexDoc`
+   * on upload, update and delete), so a document that was written while search
+   * was broken is never indexed on its own — the primary-key defect that left
+   * the index empty left every existing document without an entry, and nothing
+   * in the product would ever have added one. This is the repair path, and the
+   * reason it reports `failed` as well as `indexed`: a partial rebuild must not
+   * read as a complete one.
+   */
+  async reindexSearch(user: AuthenticatedUser, query: { organizationId?: string; batchSize?: number }) {
+    this.assertPlatformAdmin(user);
+    const batchSize = Math.min(Math.max(query.batchSize ?? 200, 1), 500);
+    const where = {
+      deletedAt: null,
+      ...(query.organizationId ? { organizationId: query.organizationId } : {}),
+    };
+
+    const total = await this.prisma.document.count({ where });
+    let indexed = 0;
+    let failed = 0;
+
+    // Paged by primary key rather than by the row count, so a document created
+    // while the rebuild runs cannot shift a page boundary and hide a row.
+    let cursor: string | undefined;
+    for (;;) {
+      const batch = await this.prisma.document.findMany({
+        where,
+        select: {
+          id: true,
+          organizationId: true,
+          title: true,
+          fileName: true,
+          tags: true,
+          status: true,
+          updatedAt: true,
+        },
+        orderBy: { id: 'asc' },
+        take: batchSize,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      });
+      if (batch.length === 0) break;
+
+      const report = await this.meili.indexDocs(
+        batch.map((doc) => ({ ...doc, updatedAt: doc.updatedAt.toISOString() })),
+      );
+      indexed += report.indexed;
+      failed += report.failed;
+      cursor = batch[batch.length - 1].id;
+      if (batch.length < batchSize) break;
+    }
+
+    // Read the index back: a rebuild that reported success but wrote nothing is
+    // the failure this endpoint exists to repair.
+    const documentsInIndex = await this.meili.documentCount().catch(() => null);
+    return { total, indexed, failed, documentsInIndex };
   }
 
   /** Cross-tenant platform metrics. */

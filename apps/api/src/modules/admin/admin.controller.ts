@@ -1,6 +1,6 @@
-import { Body, Controller, Get, Param, Patch, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { IsEnum } from 'class-validator';
+import { IsEnum, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
 import { AdminService } from './admin.service';
 import { CurrentUser } from '../../common/decorators';
 import { AuthenticatedUser } from '../../common/types';
@@ -11,6 +11,12 @@ class OrgStatusDto {
 
 class UserStatusDto {
   @IsEnum(['ACTIVE', 'SUSPENDED', 'DEACTIVATED']) status!: 'ACTIVE' | 'SUSPENDED' | 'DEACTIVATED';
+}
+
+class ReindexSearchDto {
+  /** Restrict the rebuild to one tenant; omitted means every tenant. */
+  @IsOptional() @IsString() organizationId?: string;
+  @IsOptional() @IsInt() @Min(1) @Max(500) batchSize?: number;
 }
 
 @ApiTags('admin')
@@ -76,5 +82,14 @@ export class AdminController {
   @ApiOperation({ summary: 'Platform-wide counts (platform admins)' })
   metrics(@CurrentUser() user: AuthenticatedUser) {
     return this.admin.metrics(user);
+  }
+
+  @Post('search/reindex')
+  @ApiOperation({ summary: 'Rebuild the document search index from the database (platform admins)' })
+  reindexSearch(@CurrentUser() user: AuthenticatedUser, @Body() dto: ReindexSearchDto) {
+    return this.admin.reindexSearch(user, {
+      organizationId: dto.organizationId,
+      batchSize: dto.batchSize,
+    });
   }
 }
