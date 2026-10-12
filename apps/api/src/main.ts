@@ -10,6 +10,7 @@ import { ConfigService } from '@nestjs/config';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
+import { assertSecretPosture } from './config/secret-posture';
 
 // Prisma stores byte counts as BigInt, which JSON.stringify rejects. Serialize
 // them as Numbers so every response (documents, versions, …) round-trips.
@@ -22,6 +23,10 @@ import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 
 async function bootstrap() {
+  // Before the container is built: a shipped placeholder secret is a security
+  // posture, not a runtime error to discover from the first forged token.
+  assertSecretPosture();
+
   const app = await NestFactory.create(AppModule, { bufferLogs: false });
   const config = app.get(ConfigService);
   const logger = new Logger('Bootstrap');
