@@ -66,6 +66,16 @@ for a signer who may not act yet, and `signerId` is required when a parallel
 request releases several signers at once, because guessing could put the device in
 the wrong hands.
 
+**The same class of credential can be obtained for the holder's own signature.**
+`POST /signatures/self-sign` (roadmap §W2) returns a link for the caller's own
+signature — the case where the sender is the signer — and it is deliberately not
+the handover: it can only ever address the caller (the signer row is created from
+their own identity and then bound to their `userId`, so the session is an OIDC
+identity rather than a guest), it cannot be pointed at another signer's row, and
+no `HANDED_OVER` event is written, because no device changed hands. The token is
+still a guest credential in form, so the signature records IP, user agent and the
+content hash exactly as any other signer's does.
+
 ### Placed fields a signer fills
 
 A template's placements are copied onto the request at send time and **bound to

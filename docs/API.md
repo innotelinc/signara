@@ -45,7 +45,7 @@ GET /api/v1/auth/callback?code=&state=   → session cookies set
 | Users | `/users` | me, members, invite, role changes, remove |
 | Documents | `/documents` | upload, list/search, versions, download, delete |
 | Templates | `/templates` | CRUD + fields + variables |
-| Signatures | `/signatures` | requests CRUD, cancel, remind, evidence, public token signing |
+| Signatures | `/signatures` | requests CRUD, cancel, remind, evidence, `self-sign`, public token signing |
 | Audit | `/audit` | query, CSV export, CSP-report ingestion |
 | Billing | `/billing` | account, plans, subscriptions, invoices, usage |
 | Notifications | `/notifications` | list, mark read |

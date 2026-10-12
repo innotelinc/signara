@@ -37,6 +37,12 @@ export interface FieldValueInput {
 
 export interface CreateRequestInput {
   documentId: string;
+  /**
+   * Use this template's placements instead of the document's own. The document
+   * is relinked to it, so the two agree afterwards and a later send from the
+   * same document collects the same fields.
+   */
+  templateId?: string;
   title?: string;
   message?: string;
   deadline?: Date;
@@ -156,14 +162,16 @@ export class SignaturesService {
     // Sequential mode: only the first (or next) signer may act at a time.
     const mode = input.mode ?? SigningMode.SEQUENTIAL;
 
-    // Resolve the document's template placements *before* the request exists, so
-    // a template that points a field at a signer the request does not have fails
-    // here with a reason, rather than sending an envelope that silently omits a
-    // field the sender believed was on it.
-    const placements = await this.loadTemplatePlacements(
-      document.templateId,
-      orderedSigners.length,
-    );
+    // The caller may name a template (the self-sign flow does, so a document that
+    // was never linked to one still collects placed fields); otherwise the
+    // document's own link is the source.
+    const templateId = input.templateId ?? document.templateId;
+
+    // Resolve the template placements *before* the request exists, so a template
+    // that points a field at a signer the request does not have fails here with a
+    // reason, rather than sending an envelope that silently omits a field the
+    // sender believed was on it.
+    const placements = await this.loadTemplatePlacements(templateId, orderedSigners.length);
 
     const request = await this.prisma.signingRequest.create({
       data: {
@@ -204,7 +212,11 @@ export class SignaturesService {
 
     await this.prisma.document.update({
       where: { id: document.id },
-      data: { status: DocumentStatus.AWAITING_SIGNATURE },
+      data: {
+        status: DocumentStatus.AWAITING_SIGNATURE,
+        // Only when the caller named one — an untouched link is not rewritten.
+        ...(input.templateId ? { templateId: input.templateId } : {}),
+      },
     });
     if (placements.length) {
       await this.prisma.requestField.createMany({
@@ -956,6 +968,77 @@ export class SignaturesService {
       requestId: request.id,
       signerId: signer.id,
       signerEmail: signer.email,
+      url: `${this.webUrl().replace(/\/$/, '')}/sign/${signer.token}`,
+    };
+  }
+
+  /**
+   * Creates a request the caller signs themselves, and returns the link to open
+   * on this device ("Sign yourself", roadmap §W2).
+   *
+   * Every other way to get a document signed ends in someone else's inbox; this
+   * one hands the link back to the sender, so a document that only needs one
+   * signature does not need a second party to exist. The shape is the in-person
+   * handover's — create the request with the caller as its only signer and return
+   * the signing link instead of emailing it (`sendInvites: false`). Two things
+   * are deliberately different. The signer row is linked to the caller's user
+   * (`userId`), so the session is recognised as an OIDC identity rather than an
+   * anonymous guest token — the evidence for an account holder should not read
+   * like a stranger's. And no `HANDED_OVER` event is written: an operator putting
+   * a device in someone else's hands is a different fact from a sender signing
+   * their own document, and the trail must not conflate them. The signature is
+   * recorded through the ordinary public room, so IP, timestamp and content hash
+   * are still captured.
+   *
+   * The request is not bare: the caller names a `templateId`, and that template's
+   * placements are copied onto the request and bound to the caller's signer row,
+   * so the room opens with the fields the sender placed — and they land in the
+   * evidence — instead of an empty page. A document that already carries a
+   * template link needs no `templateId`; one that does not would otherwise send
+   * itself a blank page, which is what this flow exists to stop. Templates are
+   * tenant-scoped, so the id is checked before anything is created.
+   */
+  async selfSign(user: AuthenticatedUser, documentId: string, templateId?: string) {
+    const orgId = user.org?.id;
+    if (!orgId) throw new ForbiddenException('No active tenant');
+
+    if (templateId) {
+      const template = await this.prisma.template.findFirst({
+        where: { id: templateId, organizationId: orgId },
+        select: { id: true },
+      });
+      if (!template) throw new NotFoundException('Template not found');
+    }
+
+    const request = await this.createRequest(user, {
+      documentId,
+      templateId,
+      mode: SigningMode.PARALLEL,
+      signers: [
+        {
+          email: user.email,
+          name: user.displayName ?? undefined,
+          role: SignerRole.SIGNER,
+          orderIndex: 0,
+        },
+      ],
+      sendInvites: false,
+    });
+
+    const signer = request.signers[0];
+    await this.prisma.signer.update({
+      where: { id: signer.id },
+      data: { userId: user.id },
+    });
+
+    const fieldsPlaced = await this.prisma.requestField.count({
+      where: { requestId: request.id, signerId: signer.id },
+    });
+
+    return {
+      requestId: request.id,
+      signerId: signer.id,
+      fieldsPlaced,
       url: `${this.webUrl().replace(/\/$/, '')}/sign/${signer.token}`,
     };
   }

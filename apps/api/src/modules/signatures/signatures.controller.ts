@@ -49,6 +49,17 @@ class CreateRequestDto {
   workflowRules?: WorkflowRuleDto[];
 }
 
+class SelfSignDto {
+  /** The document the caller wants to sign themselves. */
+  @IsString() documentId!: string;
+  /**
+   * The template whose placed fields the caller fills while signing. Optional
+   * only because a document can already carry a template link; without either,
+   * the signing room opens on a blank page.
+   */
+  @IsOptional() @IsString() templateId?: string;
+}
+
 class FieldValueDto {
   /** Id of a `requestedFields` entry this value answers. */
   @IsString() id!: string;
@@ -162,6 +173,16 @@ export class SignaturesController {
     @Body('signerId') signerId?: string,
   ) {
     return this.signatures.inPersonSession(user, id, signerId);
+  }
+
+  @Post('self-sign')
+  @TenantRequired()
+  @Permissions('signing.send')
+  @ApiOperation({
+    summary: 'Create a request the caller signs themselves, and return the signing link',
+  })
+  selfSign(@CurrentUser() user: AuthenticatedUser, @Body() dto: SelfSignDto) {
+    return this.signatures.selfSign(user, dto.documentId, dto.templateId);
   }
 
   // -------------------------------------------------- public token links ----

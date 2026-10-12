@@ -39,7 +39,13 @@ describe('SignaturesService', () => {
     signature: { create: jest.fn() },
     signatureEvent: { create: jest.fn(), findMany: jest.fn() },
     templateField: { findMany: jest.fn() },
-    requestField: { findMany: jest.fn(), createMany: jest.fn(), update: jest.fn() },
+    template: { findFirst: jest.fn() },
+    requestField: {
+      findMany: jest.fn(),
+      createMany: jest.fn(),
+      update: jest.fn(),
+      count: jest.fn(),
+    },
     $transaction: jest.fn((operations: Promise<unknown>[]) => Promise.all(operations)),
   };
 
@@ -77,6 +83,10 @@ describe('SignaturesService', () => {
     prismaMock.templateField.findMany.mockReset().mockResolvedValue([]);
     prismaMock.requestField.findMany.mockReset().mockResolvedValue([]);
     prismaMock.requestField.update.mockReset().mockResolvedValue({});
+    // A request with no placements is the default; cases that place fields set it.
+    prismaMock.requestField.createMany.mockReset().mockResolvedValue({ count: 0 });
+    prismaMock.requestField.count.mockReset().mockResolvedValue(0);
+    prismaMock.template.findFirst.mockReset().mockResolvedValue(null);
     configValues = {
       'reminders.afterDays': 3,
       'reminders.max': 3,
@@ -563,6 +573,216 @@ describe('SignaturesService', () => {
           metadata: expect.objectContaining({ inPerson: true }),
         }),
       });
+    });
+  });
+
+  describe('sign yourself (roadmap W2)', () => {
+    beforeEach(() => {
+      configValues['app.webUrl'] = 'https://app.example.test/';
+    });
+
+    const selfSigner = {
+      id: 's-1',
+      email: user.email,
+      role: SignerRole.SIGNER,
+      orderIndex: 0,
+      status: SignerStatus.INVITED,
+      token: 'sgn_self_one',
+    };
+
+    /** A placement saved on a template, as createRequest would read it. */
+    const placement = (over: Record<string, unknown> = {}) => ({
+      id: 'tf-1',
+      templateId: 'tpl-1',
+      type: FieldType.NAME,
+      name: 'Full name',
+      key: 'full_name',
+      isRequired: true,
+      pageNumber: 1,
+      assigneeOrder: 0,
+      x: 10,
+      y: 20,
+      width: 30,
+      height: 40,
+      options: null,
+      ...over,
+    });
+
+    /** The request createRequest builds, with the caller as its only signer. */
+    function primeRequest(document: Record<string, unknown>) {
+      prismaMock.document.findFirst.mockResolvedValue(document);
+      prismaMock.signingRequest.create.mockResolvedValue({
+        id: 'req-1',
+        signers: [selfSigner],
+      });
+      prismaMock.signingRequest.findUniqueOrThrow.mockResolvedValue({
+        id: 'req-1',
+        signers: [selfSigner],
+        document,
+      });
+    }
+
+    it('creates a request for the caller as its only signer and hands back the link', async () => {
+      const document = { id: 'doc-1', status: 'DRAFT', title: 'Contract', templateId: null };
+      const signer = {
+        id: 's-1',
+        email: user.email,
+        role: SignerRole.SIGNER,
+        orderIndex: 0,
+        status: SignerStatus.INVITED,
+        token: 'sgn_self_one',
+      };
+      prismaMock.document.findFirst.mockResolvedValue(document);
+      prismaMock.signingRequest.create.mockResolvedValue({ id: 'req-1', signers: [signer] });
+      prismaMock.signingRequest.findUniqueOrThrow.mockResolvedValue({
+        id: 'req-1',
+        signers: [signer],
+        document,
+      });
+
+      const result = await service.selfSign(user, 'doc-1');
+
+      expect(result).toEqual({
+        requestId: 'req-1',
+        signerId: 's-1',
+        // No template named and none on the document: nothing was placed, which
+        // the response says out loud rather than leaving the caller to find out
+        // in the room.
+        fieldsPlaced: 0,
+        url: 'https://app.example.test/sign/sgn_self_one',
+      });
+      // Parallel, one signer, and no email: this is the caller signing, so no
+      // invitation goes out and nobody has to wait their turn.
+      expect(prismaMock.signingRequest.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            mode: SigningMode.PARALLEL,
+            signers: {
+              create: [expect.objectContaining({ email: user.email, orderIndex: 0 })],
+            },
+          }),
+        }),
+      );
+      expect(queueMock.add).not.toHaveBeenCalled();
+    });
+
+    it('links the signer to the caller so the session is an identity, not a guest', async () => {
+      const document = { id: 'doc-1', status: 'DRAFT', title: 'Contract', templateId: null };
+      const signer = {
+        id: 's-1',
+        email: user.email,
+        role: SignerRole.SIGNER,
+        orderIndex: 0,
+        status: SignerStatus.INVITED,
+        token: 'sgn_self_one',
+      };
+      prismaMock.document.findFirst.mockResolvedValue(document);
+      prismaMock.signingRequest.create.mockResolvedValue({ id: 'req-1', signers: [signer] });
+      prismaMock.signingRequest.findUniqueOrThrow.mockResolvedValue({
+        id: 'req-1',
+        signers: [signer],
+        document,
+      });
+
+      await service.selfSign(user, 'doc-1');
+
+      expect(prismaMock.signer.update).toHaveBeenCalledWith({
+        where: { id: 's-1' },
+        data: { userId: user.id },
+      });
+      // A sender signing their own document is not a device handover, so the
+      // trail must not claim one happened.
+      expect(prismaMock.signatureEvent.create).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ type: SignatureEventType.HANDED_OVER }),
+        }),
+      );
+    });
+
+    it('refuses when the caller has no active tenant', async () => {
+      const tenantless = { ...user, org: undefined };
+      await expect(service.selfSign(tenantless, 'doc-1')).rejects.toThrow('No active tenant');
+    });
+
+    it('collects the chosen template’s placements instead of signing a blank page', async () => {
+      primeRequest({ id: 'doc-1', status: 'DRAFT', title: 'Contract', templateId: null });
+      prismaMock.template.findFirst.mockResolvedValue({ id: 'tpl-1' });
+      prismaMock.templateField.findMany.mockResolvedValue([placement()]);
+      prismaMock.requestField.createMany.mockResolvedValue({ count: 1 });
+      prismaMock.requestField.count.mockResolvedValue(1);
+
+      const result = await service.selfSign(user, 'doc-1', 'tpl-1');
+
+      // The placement is copied onto the request and bound to the caller's own
+      // signer row, so the room opens with it and the value lands in evidence.
+      expect(prismaMock.templateField.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { templateId: 'tpl-1' } }),
+      );
+      expect(prismaMock.requestField.createMany).toHaveBeenCalledWith({
+        data: [
+          expect.objectContaining({
+            requestId: 'req-1',
+            signerId: 's-1',
+            type: FieldType.NAME,
+            key: 'full_name',
+            isRequired: true,
+          }),
+        ],
+      });
+      expect(result.fieldsPlaced).toBe(1);
+      // The document is relinked, so a later send from it collects the same fields.
+      expect(prismaMock.document.update).toHaveBeenCalledWith({
+        where: { id: 'doc-1' },
+        data: { status: DocumentStatus.AWAITING_SIGNATURE, templateId: 'tpl-1' },
+      });
+    });
+
+    it('uses the document’s own template link when no template is named', async () => {
+      primeRequest({ id: 'doc-1', status: 'DRAFT', title: 'Contract', templateId: 'tpl-9' });
+      prismaMock.templateField.findMany.mockResolvedValue([
+        placement({ templateId: 'tpl-9', assigneeOrder: 0 }),
+      ]);
+      prismaMock.requestField.count.mockResolvedValue(1);
+
+      const result = await service.selfSign(user, 'doc-1');
+
+      expect(prismaMock.templateField.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { templateId: 'tpl-9' } }),
+      );
+      expect(result.fieldsPlaced).toBe(1);
+      // Nothing to relink and nothing to look up: the document already names it.
+      expect(prismaMock.template.findFirst).not.toHaveBeenCalled();
+      expect(prismaMock.document.update).toHaveBeenCalledWith({
+        where: { id: 'doc-1' },
+        data: { status: DocumentStatus.AWAITING_SIGNATURE },
+      });
+    });
+
+    it('refuses a template outside the caller’s organization', async () => {
+      primeRequest({ id: 'doc-1', status: 'DRAFT', title: 'Contract', templateId: null });
+
+      await expect(service.selfSign(user, 'doc-1', 'tpl-other')).rejects.toThrow(
+        'Template not found',
+      );
+      expect(prismaMock.template.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'tpl-other', organizationId: 'org-1' } }),
+      );
+      // Refused before anything exists, so no orphan request is left behind.
+      expect(prismaMock.signingRequest.create).not.toHaveBeenCalled();
+      expect(prismaMock.requestField.createMany).not.toHaveBeenCalled();
+    });
+
+    it('refuses a template whose fields belong to a signer the request does not have', async () => {
+      primeRequest({ id: 'doc-1', status: 'DRAFT', title: 'Contract', templateId: null });
+      prismaMock.template.findFirst.mockResolvedValue({ id: 'tpl-1' });
+      prismaMock.templateField.findMany.mockResolvedValue([
+        placement({ id: 'tf-2', name: 'Notary', assigneeOrder: 1 }),
+      ]);
+
+      await expect(service.selfSign(user, 'doc-1', 'tpl-1')).rejects.toThrow(
+        'assigned to signer 2, but this request has 1 signer(s)',
+      );
+      expect(prismaMock.signingRequest.create).not.toHaveBeenCalled();
     });
   });
 

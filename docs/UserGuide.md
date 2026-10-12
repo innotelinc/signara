@@ -28,6 +28,7 @@ Supported actions per document (depends on your role):
 | Download original / versions | Anyone with document access |
 | View version history | Members+ (with `documents.versions`) |
 | Send for signature | Members+ (`signing.send`) |
+| Sign it yourself | Members+ (`signing.send`) |
 | Update metadata / tags | Members+ |
 | Delete (soft) | Members+ (`documents.delete`) |
 | Audit / evidence | Auditors and above |
@@ -46,6 +47,20 @@ Supported actions per document (depends on your role):
 4. Optional: add a message and a deadline.
 5. **Send** — each recipient receives an email with a secure link.
 
+**Signing it yourself.** If you are the only signer, you do not need to add
+anyone: open the document and press **Sign yourself**. Signara creates the request
+with you as its only signer and opens your signing link straight away — no
+invitation email, nothing to wait for. It is an ordinary request afterwards, so
+it appears in your list and can be cancelled or exported like any other.
+
+**Sign yourself** first asks which template's fields the session collects — that
+is where the **fields** you will fill on the page come from, and where what you
+answer is recorded afterwards. The picker names each template and counts its
+fields, and preselects the one this document is already linked to. Choosing a
+template links the document to it, so sending the same document later collects
+the same fields. With no template the request collects your signature only, and
+the panel says so before you open the room.
+
 ## 4. Signing a document
 
 1. Open the link from the email (it looks like
@@ -57,6 +72,9 @@ Supported actions per document (depends on your role):
    recorded in the audit trail.
 5. You can also **decline** with a reason; in sequential flows a decline pauses
    the request.
+
+> If you started the request yourself with **Sign yourself**, this is the same
+> room — the link came from your own document page instead of an email.
 
 > The link is personal and secret — don&apos;t forward it. Requests expire after
 > the deadline.

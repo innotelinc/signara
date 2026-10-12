@@ -759,6 +759,60 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
+  /signatures/self-sign:
+    post:
+      tags: [signatures]
+      x-tenant-required: true
+      summary: Create a request the caller signs themselves, and return the signing link
+      description: >-
+        For a document that needs one signature — the sender's own — with no second
+        party and no email: the request is created with the caller as its only
+        signer and the signing link is returned rather than delivered. The signer
+        row is linked to the caller's user (`userId`), so the session is an OIDC
+        identity rather than an anonymous guest token, and no `HANDED_OVER` event
+        is recorded, because no device changed hands. The placements the caller
+        fills are copied onto the request from `templateId` (or, when it is
+        omitted, from the document's own template link) and bound to that signer
+        row, so the room opens with those fields and their values reach the
+        evidence. The document is relinked to whichever template was used. A
+        template outside the caller's organization is a `404`; a template whose
+        placement is assigned to a second signer is refused, because a one-signer
+        request cannot honestly collect that field.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [documentId]
+              properties:
+                documentId: { type: string, format: uuid }
+                templateId:
+                  type: string
+                  format: uuid
+                  nullable: true
+                  description: >-
+                    The template whose placed fields this session collects.
+                    Optional only because a document can already carry a template
+                    link; with neither, the signature is the only thing collected.
+      responses:
+        '201':
+          description: The caller's own signing link
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  requestId: { type: string, format: uuid }
+                  signerId: { type: string, format: uuid }
+                  fieldsPlaced:
+                    type: integer
+                    description: How many placed fields the request collects from the caller.
+                  url: { type: string, format: uri }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
   /signatures/public/{token}:
     get:
       tags: [signatures]

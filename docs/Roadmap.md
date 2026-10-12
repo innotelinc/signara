@@ -113,6 +113,7 @@ completion mail subjects and bodies #83 has to keep, and the certificate layout
 | Upload / versions / download                   | `documents` controller: `upload`, `:id`, `:id/download`, `:id/versions`                                                                                                                                                                                                                                    | —                                                                                                                                             |
 | Templates + fields                             | `templates` module; web `/templates`, `/templates/new`, `/templates/[id]`; `TemplateField` model + `assigneeOrder`, `RequestField` placements, and a signing room that renders and records what each signer must fill **landed 2026-09-21** (#81)                                                          | placement reaches the signer and the evidence end to end, in every type but attachments                                                       |
 | Send for signature (sequential/parallel)       | `signatures`: `POST /requests`, `GET /requests`, `:id/cancel`, `:id/remind`, `:id/evidence`                                                                                                                                                                                                                | —                                                                                                                                             |
+| Sign your own document                         | `POST /signatures/self-sign` creates the request with the caller as its only signer, copies the chosen template's placements onto it so those fields are collected, and returns the link to open; web **Sign yourself** on the document page (with the template picker) — **landed 2026-10-12**            | —                                                                                                                                             |
 | Guest signing without an account               | `/sign/[token]`, `POST /signatures/public/:token/sign`                                                                                                                                                                                                                                                     | —                                                                                                                                             |
 | Reminders / escalation                         | `:id/remind`, `WorkflowRule`, and a scheduled sweep (`sweepDueReminders`, repeatable `signing` queue job) — **landed 2026-09-20** (#82)                                                                                                                                                                    | —                                                                                                                                             |
 | Completion email                               | `mailer` module + `email-templates.ts`; `Notification` model                                                                                                                                                                                                                                               | keep the sender identity so deliverability doesn't regress                                                                                    |
@@ -129,12 +130,13 @@ completion mail subjects and bodies #83 has to keep, and the certificate layout
 | Admin/ops view                                 | `admin`: orgs, users, status, `metrics`                                                                                                                                                                                                                                                                    | —                                                                                                                                             |
 
 **Exit:** every row is either **shipped**, **decided out of scope with a reason**,
-or **scheduled** — nothing is "unknown". Status: 10 rows shipped (upload,
+or **scheduled** — nothing is "unknown". Status: 11 rows shipped (upload,
 versions, download; send for signature; guest signing; audit trail; admin/ops;
 reminders — #82, 2026-09-20; outbound webhooks — #85, 2026-09-20; in-person
-signing — #88, 2026-09-21; templates + fields — #81, 2026-09-21), **8 still filed
-as issues #83–#87, #89–#92** — 5 gaps and 3 decisions (bulk send, cloud-storage
-import, SMS/WhatsApp), plus the billing question in §8.
+signing — #88, 2026-09-21; templates + fields — #81, 2026-09-21; sign your own
+document — 2026-10-12, **no issue**: it was not in the 2026-09-15 inventory),
+**8 still filed as issues #83–#87, #89–#92** — 5 gaps and 3 decisions (bulk send,
+cloud-storage import, SMS/WhatsApp), plus the billing question in §8.
 Two tracker premises were stale and are corrected on the issues: #91 (the
 locales exist — 7 catalogs shipped 2026-09-20) and #82 (the manual reminder was
 also sending the _invite_ template, because the enqueued job never said it was a
@@ -191,6 +193,45 @@ it is refused at send time with that reason. Collecting an uploaded file into a
 request is its own piece of work — retention, scanning, access to the stored file
 — and faking it (recording a file name, say) would put a claim in the evidence
 that the bytes do not support.
+
+**Signing your own document, without a second party (2026-10-12).** Every
+delivery choice in the send flow ends in someone else's inbox, so a document that
+needs exactly one signature — the sender's own — had no path through the product
+short of adding a real address that then had to be waited on. `POST /signatures/self-sign`
+creates the request with the caller as its only signer and returns the signing
+link; the document page's **Sign yourself** button opens it. It is built on the
+in-person handover, because that is the other place a link is handed over rather
+than mailed (`sendInvites: false`), with two deliberate departures. The signer row
+carries the caller's `userId`, so the session reads as an OIDC identity rather
+than an anonymous guest — an account holder's signature should not be evidenced
+the way a stranger's is. And no `HANDED_OVER` event is written: putting a device
+in someone else's hands is a different fact from signing your own document, and a
+trail that recorded one as the other would be wrong about who was present. The
+signature itself still goes through the ordinary public room, so IP, timestamp,
+user agent and content hash are captured exactly as for any other signer, and the
+request is an ordinary request afterwards — cancellable, exportable, and visible
+in the dashboard.
+
+**And it collects fields, not just a signature.** The first cut of this flow
+created a bare request: `self-sign` took a document id and nothing else, and the
+placements a signer fills were read from `Document.templateId` — a link that is
+only ever set **at upload**. A document uploaded without a template (the common
+case for "I just need to sign this myself") therefore opened a signing room with a
+blank page and no field on it, which is the one thing #81 spent a week removing
+for everybody else. The fix is the picker, not a default: **Sign yourself** asks
+which template's fields this session collects, preselecting the document's own
+link, and `POST /signatures/self-sign` now takes an optional `templateId`.
+`CreateRequestInput` carries it through to the same `loadTemplatePlacements` /
+`placementsForRequest` path #81 built, so the placements are copied onto the
+request and bound to the caller's own signer row — the room shows them, the values
+land in the evidence, and the document is relinked to that template so a later
+send from it collects the same fields. Two behaviours fall out of reusing that
+path, both deliberate: a template is checked against the caller's tenant before
+anything is created (a foreign id is a 404, not a silent no-fields request), and
+a placement assigned to a second signer **refuses the self-sign** rather than
+dropping it, because a one-signer request cannot honestly collect signer two's
+field. Choosing no template stays legitimate — its panel says so, in amber, before
+the room opens.
 
 ### W3 — Storage onto Onyx (P2, the one hard blocker)
 

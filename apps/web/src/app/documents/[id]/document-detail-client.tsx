@@ -13,6 +13,7 @@ import {
   PenLine,
   Send,
   ShieldCheck,
+  Signature,
   Trash2,
 } from 'lucide-react';
 import { api, ApiError } from '@/lib/api';
@@ -26,6 +27,7 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { Button, Spinner } from '@/components/ui/button';
+import { SelfSignPanel } from './self-sign-panel';
 import type { DocumentDetail } from '@/lib/types';
 
 const STATUS_TONE: Record<string, 'gray' | 'green' | 'blue' | 'amber' | 'red'> = {
@@ -61,6 +63,10 @@ export function DocumentDetailClient({ documentId }: { documentId: string }) {
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  // Signing yourself picks a template first: the request collects that
+  // template's placed fields, and an unlinked document would otherwise open a
+  // blank page — see SelfSignPanel.
+  const [selfSignOpen, setSelfSignOpen] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -273,6 +279,10 @@ export function DocumentDetailClient({ documentId }: { documentId: string }) {
                 <FileUp className="h-4 w-4" />
                 New version
               </Button>
+              <Button variant="outline" onClick={() => setSelfSignOpen(true)}>
+                <Signature className="h-4 w-4" />
+                Sign yourself
+              </Button>
               <Link href={`/documents/${doc.id}/send`} className="btn-primary">
                 <Send className="h-4 w-4" />
                 Send for signature
@@ -281,6 +291,8 @@ export function DocumentDetailClient({ documentId }: { documentId: string }) {
           )}
         </div>
       </div>
+
+      {selfSignOpen && <SelfSignPanel document={doc} onClose={() => setSelfSignOpen(false)} />}
 
       {error && (
         <div className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
