@@ -87,10 +87,9 @@ features or UI displays.
 
 | Tool         | Where                                       | Use                                       |
 | ------------ | ------------------------------------------- | ----------------------------------------- |
-| Grafana      | `monitoring./signara.innotel.us` (or :3001) | dashboards: API, queues, storage, backups |
-| Prometheus   | :9090                                       | query & rule evaluation                   |
-| Alertmanager | :9093                                       | routes alerts (email/Slack/PagerDuty)     |
-| Loki         | :3100                                       | log search (correlate by `requestId`)     |
+| Prometheus   | :9090 (loopback)                            | metrics, query & rule evaluation          |
+| Alertmanager | :9093 (loopback)                            | routes alerts to email                    |
+| Container logs | `docker compose logs <service>`           | bounded json-file logs, `requestId` per line |
 
 Alerts to monitor (rules in `infra/monitoring/prometheus/rules.yml`):
 API 5xx > 5%, queue failure rate > 10%, certificate < 14 days, storage > 85%,

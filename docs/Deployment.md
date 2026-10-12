@@ -33,8 +33,8 @@ docker compose -f docker-compose.dev.yml up -d --build
 
 The development stack exposes the web UI on `http://localhost:3010`, the API
 on `http://localhost:8010`, Authentik on `http://localhost:9110`, MinIO on
-`http://localhost:9005` (console `:9006`), Prometheus on
-`http://localhost:9091`, and Grafana on `http://localhost:3007`.
+`http://localhost:9005` (console `:9006`) and Prometheus on
+`http://localhost:9091`.
 
 Dev published ports are deliberately disjoint from the shared production
 stack (which owns `:3000/:8000/:9000/:9002/:5432/:6379/:7700` and friends) so
@@ -84,15 +84,15 @@ COMPOSE="docker compose -f docker-compose.prod.yml -f docker-compose.override.pr
 | Restore       | `$COMPOSE exec backup /backup/restore.sh <file>`                            |
 | Stop services | `$COMPOSE down`                                                             |
 | Monitoring    | `$COMPOSE --profile monitoring up -d prometheus alertmanager`               |
-| Metrics       | Prometheus `127.0.0.1:9090`, Alertmanager `127.0.0.1:9093`, Grafana `:3001` |
+| Metrics       | Prometheus `127.0.0.1:9090`, Alertmanager `127.0.0.1:9093`               |
 
 **Using `-f docker-compose.prod.yml` alone is a real footgun, not a shortcut on
 this host.** `docker-compose.override.prod.yml` carries this deployment's
 topology, and a bare `up -d` silently undoes two things at once:
 
-- the `monitoring` profile stops applying, so Prometheus, Grafana, Loki,
-  Alertmanager and the backup container (deliberately
-  left down) get started by what looks like a routine command.
+- the `monitoring` profile stops applying, so Prometheus, Alertmanager and the
+  backup containers (deliberately left down) get started by what looks like a
+  routine command.
 - nothing on the host is re-`build`-ed, so it is easy to believe the run was a
   no-op.
 
@@ -106,8 +106,8 @@ retired store can be stopped without the API refusing to boot.
 
 ### Monitoring and alerts
 
-Prometheus, Alertmanager, Grafana, Loki, and the backup jobs are behind the
-`monitoring` profile, so a plain `up -d` leaves them stopped:
+Prometheus, Alertmanager, and the backup jobs are behind the `monitoring`
+profile, so a plain `up -d` leaves them stopped:
 
 ```bash
 docker compose -f docker-compose.prod.yml -f docker-compose.override.prod.yml \
@@ -535,6 +535,6 @@ application change loses every write since the dump for no reason.
 - [ ] PDF upload and document download work
 - [ ] Sequential and parallel signing flows complete
 - [ ] Evidence reports include hashes, timestamps, and audit events
-- [ ] Prometheus and Grafana receive metrics
+- [ ] Prometheus is scraping the API and backup metrics (`up` for both targets)
 - [ ] Backup job completes and a restore drill is recorded
 - [ ] NGINX Proxy Manager certificates renew successfully

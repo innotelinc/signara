@@ -6,13 +6,11 @@
 
 # Deployed alongside the platform with Docker Compose:
 
-# - Prometheus scrapes the API /metrics endpoint (prom-client)
+# - Prometheus scrapes the API /metrics endpoint (prom-client) and the
 
-# - Loki ingests container logs via the Promtail/docker driver
+#   backup metrics endpoint
 
-# - Alertmanager routes alerts to email/Slack/PagerDuty
-
-# - Grafana dashboards for API, queue, certificate, storage, backups
+# - Alertmanager routes alerts to email
 
 #
 
@@ -27,5 +25,15 @@
 # - Storage failures
 
 # - Backup failures
+
+#
+
+# There is no dashboards or log-search service here: Grafana and Loki were
+
+# removed (see docs/Deployment.md). Metrics are queried through Prometheus's
+
+# own UI/API on loopback; container logs live in the bounded json-file logs of
+
+# each container (`docker compose logs`).
 
 # ==========================================================================

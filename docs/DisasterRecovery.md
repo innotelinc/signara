@@ -230,7 +230,10 @@ on login.
 
 ### API 5xx spike (alert `ApiHighErrorRate`)
 
-1. `loki` — tail `api` logs for 5xx + stack traces; correlate `requestId`.
+1. Tail the `api` logs — `docker compose -f docker-compose.prod.yml logs --tail 500 api`
+   — for the 5xx and its stack trace, and correlate by the `requestId` on the
+   line. The container's bounded `json-file` log is the log store (there is no
+   log-search service since Grafana and Loki were removed).
 2. `docker compose -f docker-compose.prod.yml ps` — check service state and restarts.
 3. Check Postgres (connection count, slow queries), Redis (queue backlog).
 4. Mitigate by restarting the API service or increasing its Compose resource

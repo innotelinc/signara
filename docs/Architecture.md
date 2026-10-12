@@ -24,8 +24,8 @@ a monorepo of TypeScript applications:
                         ▼          ▼             ▼          ▼
                   ┌─────────┐ ┌────────┐  ┌──────────┐ ┌──────────────┐
                   │Postgres │ │ MinIO  │  │Meilisearch│ │ Observability│
-                  │ (Prisma)│ │ (S3)   │  │ (search)  │ │ Prom/Grafana │
-                  └─────────┘ └────────┘  └──────────┘ │ Loki/Am      │
+                  │ (Prisma)│ │ (S3)   │  │ (search)  │ │ Prometheus   │
+                  └─────────┘ └────────┘  └──────────┘ │ Alertmanager │
                                                        └──────────────┘
 ```
 
@@ -188,11 +188,13 @@ development dependency-free (see Deployment.md § SMTP).
 ## 7. Observability
 
 - **Metrics**: `/metrics` (prom-client) — HTTP totals/duration, queue gauges.
-- **Logs**: structured JSON (NestJS Logger) → Loki via Docker logging driver or
-  Promtail; correlatable via `requestId` header.
+- **Logs**: structured JSON (NestJS Logger) to stdout, bounded by each
+  container's `json-file` log config (50 MB × 10), correlatable via the
+  `requestId` on every line — `docker compose logs` is the log store.
 - **Alerts**: `infra/monitoring/prometheus/rules.yml` — API failures,
   queue failures, certificate expiration, storage, backup, database.
-- **Dashboards**: `infra/monitoring/grafana/dashboards/signara-overview.json`.
+- **Queries**: Prometheus's own UI and query API (loopback only); there is no
+  dashboards or log-search service in the stack.
 
 ## 8. Security boundaries
 

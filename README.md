@@ -103,7 +103,7 @@ deployment, Cerulean, ingress, TLS, backups, and operations.
 | Search        | Meilisearch                                                     |
 | Jobs          | BullMQ (Redis queues)                                           |
 | Identity      | Authentik (OIDC / OAuth2 / SAML / SCIM / MFA)                   |
-| Observability | Prometheus, Grafana, Loki, Alertmanager                         |
+| Observability | Prometheus, Alertmanager                                        |
 | Deployment    | Docker Compose (dev + prod), NGINX Proxy Manager                |
 
 ## 📚 Documentation
@@ -137,7 +137,7 @@ signara/
 ├── openapi/                    # Complete OpenAPI 3.0.3 specification
 ├── infra/
 │   ├── cerulean/               # Cerulean DNS/NPM/TLS reconciliation
-│   ├── monitoring/             # Prometheus, Grafana, Loki, Alertmanager
+│   ├── monitoring/             # Prometheus rules, Alertmanager
 │   ├── nginx/                  # Legacy direct NGINX Proxy Manager automation
 │   └── backup/                 # Backup & restore scripts
 ├── docs/                       # Architecture, Security, Deployment, API, guides...

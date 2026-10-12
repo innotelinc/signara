@@ -12,7 +12,7 @@
 npm install
 
 # 2. Start the infrastructure (Postgres, Redis, MinIO, Meilisearch, Authentik,
-#    Prometheus, Grafana, Loki, Alertmanager)
+#    Prometheus, Alertmanager)
 docker compose -f docker-compose.dev.yml up -d postgres redis minio meilisearch authentik-server authentik-worker authentik-db authentik-redis
 
 # 3. Copy env and keep the dev values
