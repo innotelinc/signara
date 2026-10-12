@@ -93,6 +93,15 @@ export default () => ({
     user: process.env.SMTP_USER ?? '',
     pass: process.env.SMTP_PASS ?? '',
     from: process.env.SMTP_FROM ?? 'Signara <no-reply@signara.innotel.us>',
+    // The relay is reached by its LAN address while its certificate names a host,
+    // so verification refuses it outright: "Hostname/IP does not match
+    // certificate's altnames: IP: 192.168.1.15 is not in the cert's list". That
+    // refused **every** product mail — invitations, reminders, completion
+    // notices — while the alert path kept working, because Alertmanager already
+    // has this switch and the mailer had no equivalent for it. Off unless the
+    // deployment says otherwise: skipping verification is a statement about one
+    // relay, not a default for any SMTP host.
+    tlsInsecure: process.env.SMTP_TLS_INSECURE === 'true',
   },
   monitoring: {
     otelEndpoint: process.env.OTEL_EXPORTER_OTLP_ENDPOINT ?? '',

@@ -150,11 +150,18 @@ export class EmailService {
     const user = this.config.get<string>('smtp.user') ?? '';
     const pass = this.config.get<string>('smtp.pass') ?? '';
     const secure = this.config.get<string>('smtp.secure') === 'true' || port === 465;
+    // Only when the deployment asks for it (SMTP_TLS_INSECURE). A relay reached by
+    // address while its certificate names a host fails verification with
+    // "Hostname/IP does not match certificate's altnames", which is every
+    // invitation, reminder and completion mail — the alert path hid it, because
+    // Alertmanager has its own copy of this switch and kept sending.
+    const tlsInsecure = this.config.get<boolean>('smtp.tlsInsecure') === true;
 
     this.transporter = nodemailer.createTransport({
       host: this.config.get<string>('smtp.host'),
       port,
       secure, // 465 = implicit TLS; else STARTTLS
+      ...(tlsInsecure ? { tls: { rejectUnauthorized: false } } : {}),
       ...(user && pass ? { auth: { user, pass } } : {}),
     });
     return this.transporter;

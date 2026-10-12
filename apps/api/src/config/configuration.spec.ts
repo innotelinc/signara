@@ -31,6 +31,25 @@ function origins(): string[] {
   return configuration().app.corsOrigins;
 }
 
+describe('SMTP transport options', () => {
+  it('honours SMTP_TLS_INSECURE and stays off by default', () => {
+    const saved = process.env.SMTP_TLS_INSECURE;
+    try {
+      delete process.env.SMTP_TLS_INSECURE;
+      expect(configuration().smtp.tlsInsecure).toBe(false);
+      process.env.SMTP_TLS_INSECURE = 'true';
+      expect(configuration().smtp.tlsInsecure).toBe(true);
+      // Only an explicit 'true' counts — a stray value must not disable
+      // verification on a relay that does present a valid certificate.
+      process.env.SMTP_TLS_INSECURE = '1';
+      expect(configuration().smtp.tlsInsecure).toBe(false);
+    } finally {
+      if (saved === undefined) delete process.env.SMTP_TLS_INSECURE;
+      else process.env.SMTP_TLS_INSECURE = saved;
+    }
+  });
+});
+
 describe('CORS origin allowlist', () => {
   it('includes WEB_URL, its derived apex, and localhost dev origins by default', () => {
     delete process.env.WEB_URL;

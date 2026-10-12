@@ -1,8 +1,16 @@
 import { Test } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
+import * as nodemailer from 'nodemailer';
 import { EmailService } from './mailer.service';
 import { BrandingService } from '../branding/branding.service';
 import { PLATFORM_BRANDING } from '../branding/branding';
+
+// The transporter is where the TLS decision lands, and it is the only part of
+// this service that talks to a relay — so it is stubbed here and asserted on.
+// Nothing in the suite below reaches the network.
+jest.mock('nodemailer', () => ({
+  createTransport: jest.fn(() => ({ sendMail: jest.fn().mockResolvedValue({ messageId: 'test' }) })),
+}));
 
 describe('EmailService', () => {
   const brandingMock = {
@@ -116,6 +124,30 @@ describe('EmailService', () => {
     expect(html).toContain('Acme Legal — confidential.');
     // The platform identity is not what a branded tenant's signer sees.
     expect(html).not.toContain('Secure Every Signature');
+  });
+
+  it('skips relay verification only when SMTP_TLS_INSECURE asks for it', async () => {
+    const createTransport = nodemailer.createTransport as unknown as jest.Mock;
+    const message = { to: 'signer@signara.local', subject: 'Hi', html: '<p>hi</p>' };
+
+    // The relay is reached by IP and its certificate names a host; without this
+    // the send fails with "Hostname/IP does not match certificate's altnames"
+    // and no signing mail is delivered at all.
+    createTransport.mockClear();
+    await (await build({ 'smtp.host': '192.168.1.15', 'smtp.tlsInsecure': true }))
+      .get(EmailService)
+      .send(message);
+    expect(createTransport).toHaveBeenCalledWith(
+      expect.objectContaining({ tls: { rejectUnauthorized: false } }),
+    );
+
+    // Unasked-for verification-skipping is the thing to avoid, so the default
+    // must not carry the option at all.
+    createTransport.mockClear();
+    await (await build({ 'smtp.host': '192.168.1.15' })).get(EmailService).send(message);
+    expect(createTransport).toHaveBeenCalledWith(
+      expect.not.objectContaining({ tls: expect.anything() }),
+    );
   });
 
   it('sends the completion mail From the deployment identity, not a per-tenant one', async () => {
