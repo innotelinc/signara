@@ -34,14 +34,34 @@ are reported separately: `signara_backup_last_success_timestamp` says a backup r
 `signara_backup_mirror_offhost` says that copy is on another machine — the only one
 of the three that answers the question, and the one with the alert.
 
-**Posture as of 2026-09-20: the mirror is configured, working, and on another
-host.** `BACKUP_S3_*` points at a dedicated `onyx-objectstore` on `192.168.1.10`
+**Posture as of 2026-10-12: the mirror is configured, working, and on another
+host.** `BACKUP_S3_*` points at a dedicated `onyx-objectstore` on `192.168.1.60`
 (host `onyx`), reachable on `:2091`; `BACKUP_REQUIRE_REMOTE=true` makes a missing
 mirror fail the run; and `signara_backup_mirror_offhost` reads **1** — the mirror
-resolves to an address outside `BACKUP_LOCAL_ADDRESSES=192.168.1.46` — so
+resolves to an address outside `BACKUP_LOCAL_ADDRESSES=192.168.1.44` — so
 `BackupIsLocalOnly` clears.
 
-It is a **dedicated** store, deliberately not `.10`'s existing `onyx-e2e` object
+**Incident, 2026-10-12: the mirror endpoint had become a desk phone.** No run had
+completed since **2026-09-23**. `onyx` was renumbered off `192.168.1.10`, that
+address was handed out again (to a Yealink phone with nothing on `:2091`), and the
+dedicated store — its data and its credentials — no longer existed on the host at
+its new address. Every run dumped, archived, then failed at the mirror for 19
+days: `rclone` reported `connection refused` against a phone. It went unnoticed
+rather than unreported because the alerting this section depends on was only
+brought up on 2026-10-12 (§4) — the failure was 19 days old on the day the first
+alert could have fired. Nothing on the old store's disk survived, so the mirror
+was rebuilt rather than recovered: a second `onyx-objectstore` on `.60`, defined
+in `/root/signara-backup-store/docker-compose.yml` on that host, storing to
+`/srv/signara-backup-store` (a host bind mount), authenticating with the same
+credential pair the deployment already held (also written to
+`/root/signara-backup-store.{access,secret}` there). Its only copy of the missing
+window was this host's own cache, which was seeded up into it: 44 database dumps
+(2026-09-20 → 2026-10-12) and 15 identity dumps, with the 9 empty dumps left over
+from failed runs deliberately excluded. One dump was fetched back out and compared
+byte-identical (`sha256 d4b15c86…`). The 2026-09-20 drill row below describes the
+store as it was *before* the renumbering.
+
+It is a **dedicated** store, deliberately not `onyx`'s own object
 store on `:2090`. That one keeps its objects in the docker named volume
 `onyx-e2e_onyx-objectstore-state` and authenticates with the checked-in
 `onyx-e2e-access` / `onyx-e2e-secret-not-a-real-key` pair, so a routine
@@ -163,7 +183,7 @@ a plan:
 the mirror, so the restore path and the dump are measured rather than assumed.
 Two limits remain, and they are narrower than they were. The mirror is now on
 another machine, so losing this host no longer loses the data — that is the
-failure the estate actually suffered. But `192.168.1.10` is on the same LAN, so
+failure the estate actually suffered. But `192.168.1.60` is on the same LAN, so
 it does not survive the site going away, and it is a development host: the store
 is durable (a host bind mount, not a volume), but the box is not provisioned as a
 backup target. A mirror off-site is therefore the next durability step, not a
@@ -283,9 +303,18 @@ keeps its own credentials throughout.
 ### Backup failure (alert `BackupJobFailed` / `BackupStale`)
 
 1. `docker compose ... exec backup cat /backup-cache/backup.log`.
-2. Common causes: Postgres credentials rotated, S3 endpoint unreachable,
+2. Common causes: Postgres credentials rotated; the S3 endpoint unreachable —
+   **check that the address still points at the host that owns the store**, since
+   the estate renumbers hosts and a stale endpoint fails as `connection refused`
+   against whatever inherited the IP (on 2026-10-12 it had become a desk phone);
    disk full on the backup volume.
-3. Re-run manually: `docker compose -f docker-compose.prod.yml exec backup /backup/backup.sh`.
+3. A run that reports failure *after doing all of its work* is not a backup
+   failure: `exit 141` is SIGPIPE. It came from the trailing
+   `ls -lh "$BACKUP_DIR" | head -20`, which killed `ls` as soon as the cache held
+   more than 20 entries — so a job that had dumped, archived, mirrored and pruned
+   reported `last_status 0` and kept `BackupJobFailed` up. `sed` reads the listing
+   to the end now. When the log and the status disagree, read the log.
+4. Re-run manually: `docker compose -f docker-compose.prod.yml exec backup /backup/backup.sh`.
 
 ### Backups are not leaving the host (alert `BackupIsLocalOnly`)
 
@@ -302,9 +331,13 @@ keeps its own credentials throughout.
    `BACKUP_S3_BUCKET`, `BACKUP_S3_ACCESS_KEY` and `BACKUP_S3_SECRET_KEY` at a store
    on a different host, keep `BACKUP_REQUIRE_REMOTE=true` so a missing mirror
    fails the run rather than downgrading it, and recreate the backup service.
-   The current target is the dedicated store on `192.168.1.10:2091`; its
-   credentials are the literal pair in `/root/signara-backup-store.{access,secret}`
-   **on `.10`**, not `vault://` references from an ONYX `.env`.
+   The current target is the dedicated store on `192.168.1.60:2091` (host `onyx`);
+   its definition is `/root/signara-backup-store/docker-compose.yml` on that host —
+   a second `onyx-objectstore` writing to the host path `/srv/signara-backup-store`
+   (own that directory as uid `100:101`, the user the image runs as, or the store
+   crash-loops on `mkdir … permission denied`) — and its credentials are the literal
+   pair in `/root/signara-backup-store.{access,secret}` **on that host**, not
+   `vault://` references from an ONYX `.env`.
 
 ### The mirror is not pruning (mirror grows without bound)
 

@@ -250,7 +250,7 @@ database it protects. Whether that mirror is _somewhere else_ is what
 same host reads as a success while adding no durability. Off-host is proven rather
 than assumed: the job resolves the mirror endpoint and compares it against
 `BACKUP_LOCAL_ADDRESSES`, which has to list this host's addresses. This deployment
-mirrors to a dedicated `onyx-objectstore` on `192.168.1.10:2091`, whose storage is
+mirrors to a dedicated `onyx-objectstore` on `192.168.1.60:2091` (host `onyx`), whose storage is
 a host bind mount — a target inside a docker named volume (an `e2e` store) would
 be deleted by the next `down -v` while still reporting green. Object
 transfers to and from the mirror use `rclone`, because ONYX refuses the streaming

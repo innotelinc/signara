@@ -389,7 +389,9 @@ so `provision.py` cannot express them; they are managed by Cerulean directly.
 
 - [x] **Backups that exist off the box — 2026-09-20.** The mirror now lives on
       another machine: `BACKUP_S3_*` points at a dedicated `onyx-objectstore` on
-      `192.168.1.10:2091` (host `onyx`), `BACKUP_REQUIRE_REMOTE=true`, the identity
+      `192.168.1.60:2091` (host `onyx`; renumbered from `.10`, so the store was
+      rebuilt there 2026-10-12 — see DisasterRecovery.md §2),
+      `BACKUP_REQUIRE_REMOTE=true`, the identity
       database included, and `signara_backup_mirror_offhost` reads **1** — checked in
       Prometheus, not inferred — so `BackupIsLocalOnly` clears. Verified by reading
       the objects back off `.10`'s disk. Two deliberate choices, both learned from
@@ -517,7 +519,7 @@ losing this host; it is still an estimate for anything that takes the whole LAN.
 5. ~~**Run one restore drill**~~ — **done 2026-09-20**, including a production
    dump read back out of the mirror (`docs/DisasterRecovery.md` §4). ~~Make the
    mirror a different host~~ — **done 2026-09-20**: `BACKUP_S3_*` points at a
-   dedicated store on `192.168.1.10` and `signara_backup_mirror_offhost` reads 1
+   dedicated store on `192.168.1.60` and `signara_backup_mirror_offhost` reads 1
    (see W6). **Still open: an _off-site_ target**, and there is none in the estate
    yet — so this waits on hardware rather than on an unexamined gap. Until one
    exists the mirror is a LAN peer and losing the site still outlives the RTO.
