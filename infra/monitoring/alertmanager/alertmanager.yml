@@ -42,11 +42,24 @@ route:
   group_interval: 5m
   repeat_interval: 4h
   # Warnings are evaluated and stay visible in the UI, but they are not mailed:
-  # the estate's periodic probes (`estate-check`, the Alertmanager delivery
-  # probe) all fire as `severity=warning`, and mailing every one of them trained
-  # the reader to ignore the mailbox. Only `critical` still pages — an alert that
-  # matches no sub-route keeps the top-level `email` receiver.
+  # the estate's periodic probes all fire as `severity=warning`, and mailing every
+  # one of them trained the reader to ignore the mailbox. Only `critical` still
+  # pages — an alert that matches no sub-route keeps the top-level `email` receiver.
+  #
+  # The delivery probe is the one exception, and it is the reason the mailbox is
+  # worth trusting: `ips/scripts/check-alert-delivery.py` injects it on a timer and
+  # reads the mail server for the delivery, so a route that silences it leaves the
+  # estate unable to tell a working receiver from a configured one — the state this
+  # receiver sat in for its whole life before 2026-10-02, with `amtool check-config`
+  # saying SUCCESS. It was silenced here from 2026-10-12 until 2026-10-15, and the
+  # check kept "passing" in that window by matching a *different* mail that happened
+  # to arrive inside its 90 s — a resolution of an unrelated alert. Matched before
+  # the warning route, by the name only a probe carries, so the exception has one
+  # owner rather than being a general carve-out for anything named like a test.
   routes:
+    - matchers:
+        - alertname =~ "EstateDeliveryProbe.*"
+      receiver: email
     - matchers:
         - severity = warning
       receiver: silent
