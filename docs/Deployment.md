@@ -145,7 +145,7 @@ profile, so a plain `up -d` leaves them stopped:
 
 ```bash
 docker compose -f docker-compose.prod.yml -f docker-compose.override.prod.yml \
-  --profile monitoring up -d prometheus alertmanager backup backup-metrics
+  --profile monitoring up -d prometheus alertmanager backup backup-metrics dns-probe
 ```
 
 Prometheus and Alertmanager are published on **loopback only** by default.
@@ -344,13 +344,27 @@ Set these values in `.env`:
 
 ```bash
 CERULEAN_DNS_API_URL=http://localhost:3003
+CERULEAN_SERVICE_KEY=<scoped ceru_… key>   # see "Credentials" below
 CERULEAN_ADMIN_PASSWORD=<cerulean-admin-password>
 CERULEAN_BASE_DOMAIN=signara.innotel.us
-CERULEAN_ZONE=innotel.us
+CERULEAN_ZONE=signara.innotel.us   # the zone that HOLDS the records — not its parent
 CERULEAN_LAN_IP=192.168.1.71   # NPM upstream only; replace with host LAN IPv4
 CERULEAN_WAN_IP=73.68.203.71   # last verified WAN value; DNS only
 CERULEAN_WAN_DISCOVERY_URL=https://api.ipify.org
 ```
+
+**Credentials.** Two exist and the script prefers the service key:
+
+- `CERULEAN_SERVICE_KEY` — the scoped `ceru_…` key, presented against Cerulean's
+  `/api/service` bridge. This is the only **non-interactive** path once Cerulean
+  disables password sign-in, which it does when Authentik owns identity (the case
+  on this estate: `POST /api/auth/login` answers *"Password sign-in is disabled —
+  sign in with Authentik"*). The scopes decide what a run can do. The
+  `signara-dns` key holds `dns:read`, `dns:write`, `domains:read` and `certs:read`,
+  so it reconciles records and nothing else — pass `--dns-only`, which states that
+  rather than letting the other steps be skipped quietly.
+- `CERULEAN_ADMIN_PASSWORD` — Cerulean's own sign-in, for what a service key
+  cannot do: create a zone, issue or renew a certificate, reconcile NPM hosts.
 
 Preview the reconciliation:
 
@@ -364,6 +378,9 @@ Apply it during setup or independently:
 ./setup.sh --production --with-cerulean
 # or
 make cerulean-provision
+# DNS only, with the scoped key (what this estate uses):
+python3 infra/cerulean/provision.py --dns-only \
+  --zone signara.innotel.us --base-domain signara.innotel.us
 ```
 
 The checked-in map at `infra/cerulean/hosts.conf` provisions:
@@ -395,14 +412,24 @@ served by the estate's `onyx-objectstore`, reached on the host's LAN address
 listed only so provisioning leaves it correct rather than guessing.
 
 On every normal provisioning run, Cerulean redetects and validates the current
-public WAN IPv4, persists it as `CERULEAN_WAN_IP`, and uses it for DNS. Cerulean
-then registers or reuses the `innotel.us` zone, removes prior A/CNAME
-records at the six exact Signara hostnames, creates exactly one WAN A record
-per host, creates or updates the NPM hosts with the upstreams above (a per-entry
-`upstream-host` overriding `CERULEAN_LAN_IP`), and issues or
-reuses the `*.signara.innotel.us` wildcard certificate. Unrelated records in
-`innotel.us` are never removed. Certificate renewal and NPM attachment remain
-managed by Cerulean.
+public WAN IPv4, persists it as `CERULEAN_WAN_IP`, and uses it for DNS. The script
+then resolves the zone named by `CERULEAN_ZONE` and reconciles exactly one WAN A
+record per Signara hostname. The wanted record is created **before** anything else
+is removed, because the reverse order has a failure mode this estate has already
+paid for: an error between deleting and creating leaves the hostname with no
+address at all, while the zone, the edge and the certificate all still look
+healthy. It then creates or updates the NPM hosts with the upstreams above (a
+per-entry `upstream-host` overriding `CERULEAN_LAN_IP`), and issues or reuses the
+`*.signara.innotel.us` wildcard certificate. Unrelated records in the zone are
+never removed. Certificate renewal and NPM attachment remain managed by Cerulean.
+
+**`CERULEAN_ZONE` must name the zone that actually holds the records — on this
+estate `signara.innotel.us`, not `innotel.us`.** A zone named after the base
+domain shadows its parent for every name beneath it, because a nameserver answers
+from the most specific zone it holds: records written to `innotel.us` would exist
+and resolve for nobody. The script refuses that combination and names the zone to
+use instead; `--allow-shadowed-zone` overrides it only when the child zone is
+being retired deliberately.
 
 **Before trusting a provisioning run, dry-run it against the deployment:**
 `python3 infra/cerulean/provision.py --dotenv .env --dry-run` must print
@@ -410,6 +437,68 @@ managed by Cerulean.
 with the live edge — fix the map, not the reflex to re-run it. `make
 cerulean-provision` and `CERULEAN_AUTO_PROVISION=true` (which `setup.sh`
 honours) both apply it for real.
+
+### When a Signara hostname stops resolving
+
+The failure mode this estate hit on **2026-10-15**: `app.signara.innotel.us` (and
+every other Signara name) returned `DNS_PROBE_FINISHED_NXDOMAIN` while the API, the
+web app, the edge and the certificate were all healthy. The stack was fine — the
+**A records were gone from the zone**. Work through it in this order.
+
+**1. Confirm it is the name, not the stack.** Ask the nameserver directly, and
+check the app over its loopback port:
+
+```bash
+for h in signara.innotel.us app.signara.innotel.us api.signara.innotel.us \
+         auth.signara.innotel.us storage.signara.innotel.us; do
+  printf '%-34s ' "$h"; dig +short "$h" @192.168.1.71; done
+# no dig? python3 -c "import socket; print(socket.gethostbyname('app.signara.innotel.us'))"
+curl -s -o /dev/null -w 'loopback web: %{http_code}\n' \
+  -H 'Host: app.signara.innotel.us' http://192.168.1.44:3000/
+```
+
+An empty answer for a name the app is serving *is* this outage. A 200 from the
+loopback check proves the problem is purely the name.
+
+**2. Read the zone the records live in.** `signara.innotel.us` holds them; its
+parent `innotel.us` does not, and never has:
+
+```bash
+KEY="$(grep '^CERULEAN_SERVICE_KEY=' .env | cut -d= -f2-)"
+curl -s -H "Authorization: Bearer $KEY" \
+  'http://192.168.1.71:3003/api/service/dns/records?zone=signara.innotel.us'
+```
+
+Expect one A record per host plus the zone root, all pointing at
+`CERULEAN_WAN_IP` (`73.68.203.71`). The mail records — DKIM (`v1-rsa-…`,
+`v1-ed25519-…`), `_mta-sts`, `_imaps`/`_submissions` and friends — live in the
+same zone and must not be touched: **deleting the zone to "start clean" destroys
+them and breaks `signara.innotel.us` mail authentication.**
+
+**3. Restore the records.** Provisioning does it with the scoped key, no admin
+password needed, and stops on its own if it is pointed at the wrong zone:
+
+```bash
+python3 infra/cerulean/provision.py --dns-only \
+  --zone signara.innotel.us --base-domain signara.innotel.us
+```
+
+**4. Verify through the interface a user has**, not the zone file:
+
+```bash
+curl -fsS -o /dev/null -w 'app %{http_code}\n' https://app.signara.innotel.us/
+curl -fsS -o /dev/null -w 'api %{http_code}\n' https://api.signara.innotel.us/ready
+```
+
+Until the negative cache expires browsers may keep the old `NXDOMAIN` for the
+zone's 900 s minimum — `ipconfig /flushdns` on Windows.
+
+`SignaraHostnameNotResolving` (`infra/monitoring/prometheus/rules.yml`, fed by
+`infra/monitoring/dns_probe.py`) is the alert for step 1: it fires when a probe of
+these names stops matching `CERULEAN_WAN_IP`, so the next occurrence arrives as an
+alert instead of a user's report. Note that provisioning will *not* recreate a
+deleted record on its own — it reads the current records to decide whether a host
+is `unchanged`.
 
 ## 3. Legacy direct NGINX automation
 

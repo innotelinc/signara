@@ -5,15 +5,35 @@ Cerulean owns the mutations: it updates its managed BIND zone, reconciles
 NGINX Proxy Manager, and issues/renews/attaches the wildcard certificate.
 This is intentionally the same workflow used by the Monarch integration.
 
+There are two ways in, because Cerulean has two:
+
+  * an administrator password, exchanged for a session against Cerulean's own
+    sign-in; and
+  * a scoped service key (`CERULEAN_SERVICE_KEY`, the `ceru_…` token issued from
+    Cerulean's service-key UI), presented directly against `/api/service`.
+
+Cerulean disables password sign-in once Authentik owns identity — true in this
+estate — and that makes the service key the only non-interactive path there. A
+service key is *scoped*, and the scope decides what a run can do: `dns` covers
+the zone records, `npm` covers the edge hosts, and neither can create a zone or
+issue a certificate (both need an administrator session). The `signara-dns` key
+this estate issues holds `dns:read`, `dns:write`, `domains:read` and `certs:read`,
+so it can run the DNS half of this script and nothing else — say so with
+`--dns-only`, which states the limitation instead of letting the other steps be
+skipped quietly.
+
 Required environment variables:
     CERULEAN_DNS_API_URL     Cerulean DNS API URL, default http://localhost:3003
-    CERULEAN_ADMIN_PASSWORD  Cerulean administrator password
+    CERULEAN_ADMIN_PASSWORD  Cerulean administrator password (omit when using a key)
     CERULEAN_BASE_DOMAIN     public suffix, default signara.innotel.us
     CERULEAN_LAN_IP           host LAN address NPM should forward to
     CERULEAN_WAN_IP           public IPv4 address used by DNS A records
 
 Optional:
-    CERULEAN_ZONE            managed parent zone, default innotel.us
+    CERULEAN_SERVICE_KEY     scoped service key (ceru_…) used instead of the
+                             administrator password where sign-in is disabled;
+                             used in preference to the password when both are set
+    CERULEAN_ZONE            zone that holds the records, default innotel.us
     CERULEAN_CERT_TIMEOUT    certificate wait timeout in seconds, default 900
     CERULEAN_RENEW_DAYS      renew when expiry is within this many days, 30
     CERULEAN_WAN_DISCOVERY_URL public-IP endpoint, default https://api.ipify.org
@@ -61,6 +81,24 @@ class HostEntry:
     # door is oauth2-proxy on 127.0.0.1:4180) is not reachable that way, so it
     # has to say so here rather than let provisioning silently repoint it.
     host: str | None = None
+
+
+@dataclass(frozen=True)
+class ZoneRef:
+    """A zone to act on, named the way each API path needs it named.
+
+    The administrator API addresses a zone by numeric id; the service bridge
+    addresses it by name (`?zone=`). Carrying both keeps the call sites identical
+    and stops an id being invented for a credential that cannot look one up.
+    """
+
+    name: str
+    id: int | None = None
+
+    def known_id(self) -> int:
+        if self.id is None:
+            raise CeruleanError(f"Cerulean returned no id for zone {self.name}")
+        return self.id
 
 
 def load_dotenv(path: Path) -> None:
@@ -248,12 +286,23 @@ def iso_timestamp(value: str | None) -> float:
 
 
 class CeruleanClient:
-    def __init__(self, base_url: str, password: str, timeout: int, dry_run: bool):
+    def __init__(
+        self,
+        base_url: str,
+        password: str,
+        timeout: int,
+        dry_run: bool,
+        service_key: str = "",
+    ):
         self.base_url = base_url.rstrip("/")
         self.password = password
         self.timeout = timeout
         self.dry_run = dry_run
-        self.token: str | None = None
+        self.service_key = service_key.strip()
+        self.service_mode = bool(self.service_key)
+        self.scopes: set[str] = set()
+        # The service key *is* the bearer token; nothing is exchanged for it.
+        self.token: str | None = self.service_key or None
         self.planned: list[str] = []
 
     def request(self, method: str, path: str, body: dict[str, Any] | None = None) -> Any:
@@ -290,11 +339,46 @@ class CeruleanClient:
             raise CeruleanError(f"Cerulean returned invalid JSON for {method} {path}") from error
 
     def login(self) -> None:
+        if self.service_mode:
+            # Nothing to exchange. Reading whoami both proves the key is live and
+            # reports what it may do, so a missing scope is named here instead of
+            # surfacing as a 403 three steps into a provisioning run.
+            identity = self.request("GET", "/api/service/whoami")
+            if not isinstance(identity, dict) or not identity.get("prefix"):
+                raise CeruleanError("Cerulean did not recognise CERULEAN_SERVICE_KEY")
+            self.scopes = {str(scope) for scope in identity.get("scopes") or []}
+            print(
+                f"Cerulean service key: {identity.get('name', 'unnamed')} "
+                f"(scopes: {', '.join(sorted(self.scopes)) or 'none'})"
+            )
+            return
         result = self.request("POST", "/api/auth/login", {"password": self.password})
         token = result.get("token") if isinstance(result, dict) else None
         if not token:
             raise CeruleanError("Cerulean login returned no token")
         self.token = token
+
+    def require_scope(self, scope: str, action: str) -> None:
+        """Refuse an action this credential cannot perform, before it half-runs.
+
+        Only meaningful for a service key. An administrator session is scoped
+        outside this client, and second-guessing it here would be a guess.
+        """
+        if not self.service_mode:
+            return
+        if scope in self.scopes or "*" in self.scopes:
+            return
+        if self.dry_run:
+            # --dry-run makes no network calls, so the key's scopes are unknown
+            # here. Record it in the plan rather than guessing either way: a dry
+            # run that refuses on a scope it could not read is a dry run nobody
+            # can use to preview the work.
+            self.planned.append(f"needs the {scope!r} scope: {action}")
+            return
+        raise CeruleanError(
+            f"{action} needs the {scope!r} scope, which CERULEAN_SERVICE_KEY does not "
+            f"have (it has: {', '.join(sorted(self.scopes)) or 'none'})"
+        )
 
     def mutate(self, description: str, method: str, path: str, body: dict[str, Any]) -> Any:
         if self.dry_run:
@@ -303,9 +387,17 @@ class CeruleanClient:
         return self.request(method, path, body)
 
     def list_domains(self) -> list[dict[str, Any]]:
-        return self.request("GET", "/api/domains") or []
+        path = "/api/service/domains" if self.service_mode else "/api/domains"
+        return self.request("GET", path) or []
+
+    def domain_names(self) -> set[str]:
+        return {
+            str(domain.get("name", "")).lower().rstrip(".")
+            for domain in self.list_domains()
+        }
 
     def ensure_domain(self, name: str) -> dict[str, Any]:
+        """Find the zone, registering it only when the credential allows that."""
         name = name.lower().rstrip(".")
         if self.dry_run:
             self.planned.append(f"register zone {name} if missing")
@@ -313,6 +405,16 @@ class CeruleanClient:
         for domain in self.list_domains():
             if str(domain.get("name", "")).lower().rstrip(".") == name:
                 return domain
+        if self.service_mode:
+            # Creating a zone is the exact mistake the shadowing guard in main()
+            # exists to prevent — a new, empty zone named after the base domain
+            # silently hides every record the parent zone already serves — so a
+            # credential that cannot create one should never guess that it can.
+            raise CeruleanError(
+                f"zone {name} does not exist in Cerulean and a service key cannot create "
+                "it (that needs an administrator session or a key with domains:write); "
+                "check CERULEAN_ZONE against the zones at GET /api/service/domains"
+            )
         try:
             return self.request("POST", "/api/domains", {"name": name})
         except CeruleanError as error:
@@ -322,28 +424,92 @@ class CeruleanClient:
                         return domain
             raise
 
-    def list_records(self, domain_id: int) -> list[dict[str, Any]]:
-        return self.request("GET", f"/api/domains/{domain_id}/records") or []
+    def records_path(self, zone: ZoneRef) -> str:
+        if self.service_mode:
+            return f"/api/service/dns/records?zone={zone.name}"
+        return f"/api/domains/{zone.known_id()}/records"
+
+    def _record_name(self, zone: ZoneRef, relative_name: str, fqdn: str) -> str:
+        # The service bridge names a record by its FQDN; the administrator API
+        # names it relative to the zone.
+        return fqdn if self.service_mode else relative_name
+
+    def list_records(self, zone: ZoneRef) -> list[dict[str, Any]]:
+        return self.request("GET", self.records_path(zone)) or []
+
+    def add_record(
+        self,
+        description: str,
+        zone: ZoneRef,
+        relative_name: str,
+        fqdn: str,
+        record_type: str,
+        value: str,
+        ttl: int,
+    ) -> None:
+        body: dict[str, Any] = {
+            "type": record_type,
+            "name": self._record_name(zone, relative_name, fqdn),
+            "value": value,
+            "ttl": ttl,
+        }
+        if self.service_mode:
+            body["zone"] = zone.name
+        self.mutate(description, "POST", self.records_path(zone), body)
+
+    def delete_record(
+        self,
+        description: str,
+        zone: ZoneRef,
+        relative_name: str,
+        fqdn: str,
+        record_type: str,
+        value: str,
+    ) -> None:
+        # No ttl on a delete: the record is identified by type, name and value,
+        # and sending a second field for the API to match on is a way to match
+        # nothing and report success.
+        body: dict[str, Any] = {
+            "type": record_type,
+            "name": self._record_name(zone, relative_name, fqdn),
+            "value": value,
+        }
+        if self.service_mode:
+            body["zone"] = zone.name
+        self.mutate(description, "DELETE", self.records_path(zone), body)
 
     def reconcile_dns_record(
-        self, domain_id: int, relative_name: str, fqdn: str, address: str
+        self, zone: ZoneRef, relative_name: str, fqdn: str, address: str
     ) -> str:
-        """Ensure an exact Signara hostname has only one public WAN A record.
+        """Ensure an exact Signara hostname has exactly one public WAN A record.
 
-        Older runs could leave LAN A records or conflicting CNAMEs behind. Remove
-        every A/CNAME at the exact hostname before creating the desired record;
-        unrelated records in the parent zone are never touched.
+        The desired record is created *before* anything is deleted, and that order
+        is the point of this function. The obvious sequence — remove what is there,
+        then add the new record — has a failure mode measured on this estate: an
+        error between the two steps leaves the hostname with no address at all,
+        and every name under it stops resolving, while the zone, the edge and the
+        certificate all still look healthy (the 2026-10-15 outage, where the only
+        surviving records were the mail ones this function does not touch). Creating
+        first means a failure leaves the previous state intact — at worst a stale
+        record to clean up on the next run.
+
+        A CNAME is the one exception, and it is a real one: an A record and a CNAME
+        cannot coexist at the same name, so a conflicting CNAME has to be removed
+        before the A record can be created. That window cannot be closed with this
+        API; it is reported rather than hidden.
+
+        Unrelated records in the zone are never touched.
         """
         if self.dry_run:
             self.planned.append(
-                f"remove prior A/CNAME records at {fqdn} and add A {fqdn} -> {address}"
+                f"ensure A {fqdn} -> {address} and remove other A/CNAME records at {fqdn}"
             )
             return "planned"
 
         def normalized(value: Any) -> str:
             return str(value or "").lower().rstrip(".")
 
-        records = self.list_records(domain_id)
+        records = self.list_records(zone)
         matching = [
             record
             for record in records
@@ -359,27 +525,44 @@ class CeruleanClient:
         if len(matching) == 1 and len(desired) == 1:
             return "unchanged"
 
+        keep = desired[0] if desired else None
+
+        # 1. A CNAME blocks the A record from being created, so it goes first.
         for record in matching:
-            record_type = str(record.get("type", "")).upper()
+            if record is keep or str(record.get("type", "")).upper() != "CNAME":
+                continue
             current = str(record.get("value") or "").strip()
-            self.mutate(
-                f"delete {record_type} {fqdn} ({current})",
-                "DELETE",
-                f"/api/domains/{domain_id}/records",
-                {"type": record_type, "name": relative_name, "value": current},
+            self.delete_record(
+                f"delete CNAME {fqdn} ({current})",
+                zone,
+                relative_name,
+                fqdn,
+                "CNAME",
+                current,
             )
-        self.mutate(
-            f"add A {fqdn} -> {address}",
-            "POST",
-            f"/api/domains/{domain_id}/records",
-            {"type": "A", "name": relative_name, "value": address, "ttl": 300},
-        )
+
+        # 2. Create the record we actually want, before removing anything else.
+        if not desired:
+            self.add_record(
+                f"add A {fqdn} -> {address}", zone, relative_name, fqdn, "A", address, 300
+            )
+
+        # 3. The address resolves now, so the leftovers are safe to remove: stale
+        #    LAN addresses, and duplicates of the record being kept.
+        for record in matching:
+            if record is keep or str(record.get("type", "")).upper() != "A":
+                continue
+            current = str(record.get("value") or "").strip()
+            self.delete_record(
+                f"delete A {fqdn} ({current})", zone, relative_name, fqdn, "A", current
+            )
         return "updated" if matching else "added"
 
     def list_hosts(self) -> list[dict[str, Any]]:
         return self.request("GET", "/api/npm/hosts") or []
 
     def upsert_host(self, domain: str, address: str, entry: HostEntry) -> str:
+        self.require_scope("npm", f"reconciling the NPM host for {domain}")
         # A per-entry upstream overrides the LAN address; see HostEntry.host.
         target = entry.host or address
         if self.dry_run:
@@ -433,6 +616,29 @@ class CeruleanClient:
         if self.dry_run:
             self.planned.append(f"issue or renew wildcard certificate for *.{domain}")
             return {"status": "dry-run"}, "would-issue"
+
+        if self.service_mode:
+            # A service key reads certificates but cannot issue or renew them, so
+            # the honest answer is the certificate's actual state: reuse it while it
+            # is valid, and say precisely what is missing when it is not. Reporting
+            # "issued" here would be the one outcome this function must never fake.
+            now = time.time()
+            for certificate in self.request("GET", "/api/service/certificates") or []:
+                if str(certificate.get("domain", "")).lower().rstrip(".") != domain:
+                    continue
+                if not certificate.get("wildcard"):
+                    continue
+                if iso_timestamp(certificate.get("expiresAt")) > now + renew_days * 86400:
+                    return certificate, "reuse"
+                raise CeruleanError(
+                    f"the wildcard certificate for {domain} is due for renewal, which the "
+                    "service bridge cannot perform — renew it in Cerulean, or pass "
+                    "--skip-certs to leave TLS alone"
+                )
+            raise CeruleanError(
+                f"no wildcard certificate for {domain} exists and the service bridge cannot "
+                "issue one — issue it in Cerulean, or pass --skip-certs to leave TLS alone"
+            )
 
         now = time.time()
         for certificate in self.request("GET", "/api/certificates") or []:
@@ -497,11 +703,30 @@ def main() -> int:
     parser.add_argument("--skip-dns", action="store_true")
     parser.add_argument("--skip-hosts", action="store_true")
     parser.add_argument("--skip-certs", action="store_true")
+    parser.add_argument(
+        "--service-key",
+        help="scoped Cerulean service key (overrides CERULEAN_SERVICE_KEY)",
+    )
+    parser.add_argument(
+        "--dns-only",
+        action="store_true",
+        help="records only: implies --skip-hosts --skip-certs, which is all a dns-scoped key may do",
+    )
+    parser.add_argument(
+        "--allow-shadowed-zone",
+        action="store_true",
+        help="proceed even when the base domain is its own zone and shadows the target zone",
+    )
     args = parser.parse_args()
+
+    if args.dns_only:
+        args.skip_hosts = True
+        args.skip_certs = True
 
     load_dotenv(args.dotenv)
     api_url = args.api_url or os.environ.get("CERULEAN_DNS_API_URL", DEFAULT_API_URL)
     password = os.environ.get("CERULEAN_ADMIN_PASSWORD", "")
+    service_key = args.service_key or os.environ.get("CERULEAN_SERVICE_KEY", "")
     base_domain = (args.base_domain or os.environ.get("CERULEAN_BASE_DOMAIN", DEFAULT_BASE_DOMAIN)).lower().rstrip(".")
     configured_lan_ip = args.lan_ip or os.environ.get("CERULEAN_LAN_IP", "")
     configured_wan_ip = args.wan_ip or ""
@@ -534,8 +759,12 @@ def main() -> int:
     renew_days = args.renew_days if args.renew_days is not None else int(os.environ.get("CERULEAN_RENEW_DAYS", "30"))
     cert_timeout = args.cert_timeout if args.cert_timeout is not None else int(os.environ.get("CERULEAN_CERT_TIMEOUT", "900"))
 
-    if not password and not args.dry_run:
-        print("error: CERULEAN_ADMIN_PASSWORD is required", file=sys.stderr)
+    if not password and not service_key and not args.dry_run:
+        print(
+            "error: set CERULEAN_ADMIN_PASSWORD or CERULEAN_SERVICE_KEY "
+            "(password sign-in is disabled on Ceruleans that delegate to Authentik)",
+            file=sys.stderr,
+        )
         return 2
     if not forward_host:
         print("error: set CERULEAN_LAN_IP (could not detect a host LAN address)", file=sys.stderr)
@@ -546,25 +775,54 @@ def main() -> int:
         print(f"error: {error}", file=sys.stderr)
         return 2
 
-    client = CeruleanClient(api_url, password, timeout=30, dry_run=args.dry_run)
+    client = CeruleanClient(
+        api_url, password, timeout=30, dry_run=args.dry_run, service_key=service_key
+    )
     try:
         if not args.dry_run:
             client.login()
+
+        # Check the credential's reach before mutating anything. A service key
+        # without the npm scope would otherwise fail inside the NPM loop, after
+        # the DNS records had already been written — a half-applied run that looks
+        # like a successful DNS change with a mystery error stapled to it.
+        if not args.skip_hosts:
+            client.require_scope("npm", "reconciling NGINX Proxy Manager hosts")
+
         zone = args.zone or os.environ.get("CERULEAN_ZONE", DEFAULT_ZONE) or DEFAULT_ZONE
+
+        # A zone named after the base domain shadows its parent for every name under
+        # it, because a nameserver answers from the most specific zone it holds. Any
+        # record written to the parent then exists and resolves for nobody, which is
+        # the shape of the 2026-10-15 outage: the child zone held only the mail
+        # records, every host A record was missing from both zones, and the parent's
+        # own nameserver answered NXDOMAIN for the hostnames it was supposed to serve.
+        # Refusing here is the difference between a bad run and a silent one.
+        if not args.dry_run and zone.lower() != base_domain and not args.allow_shadowed_zone:
+            if base_domain in client.domain_names():
+                raise CeruleanError(
+                    f"{base_domain} is itself a zone in Cerulean, so it shadows {zone} for "
+                    f"every name under it and records written to {zone} would not resolve. "
+                    "Point provisioning at the zone that is actually authoritative "
+                    f"(--zone {base_domain} --base-domain {base_domain}), or pass "
+                    "--allow-shadowed-zone if that child zone is being retired."
+                )
+
         zone_row = client.ensure_domain(zone)
+        zone_ref = ZoneRef(name=zone, id=zone_row.get("id"))
         print(f"Cerulean: {api_url}")
-        print(f"Domain: *.{base_domain} (managed zone: {zone})")
+        print(f"Domain: *.{base_domain} (zone holding the records: {zone})")
         print(f"DNS A records: {dns_address}")
-        print(f"NPM upstreams: {forward_host} ({len(entries)} hosts)")
+        if not args.skip_hosts:
+            print(f"NPM upstreams: {forward_host} ({len(entries)} hosts)")
 
         if not args.skip_dns:
-            zone_id = zone_row.get("id")
-            if zone_id is None and not args.dry_run:
-                raise CeruleanError(f"Cerulean returned no id for managed zone {zone}")
+            if not client.service_mode and zone_ref.id is None and not args.dry_run:
+                raise CeruleanError(f"Cerulean returned no id for zone {zone}")
             for entry in entries:
                 domain = f"{entry.subdomain}.{base_domain}"
                 action = client.reconcile_dns_record(
-                    int(zone_id or 0), relative_name(domain, zone), domain, dns_address
+                    zone_ref, relative_name(domain, zone), domain, dns_address
                 )
                 print(f"DNS A {domain} -> {dns_address}: {action}")
 

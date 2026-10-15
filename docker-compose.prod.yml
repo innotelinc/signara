@@ -427,6 +427,24 @@ services:
       - backup
     logging: *logging-default
 
+  # Resolves the public hostnames every scrape so that a record disappearing from
+  # the zone is an alert rather than a support ticket (the 2026-10-15 outage). No
+  # dependency on the API or the edge on purpose: this measures the one thing that
+  # can be broken while both of them look healthy.
+  dns-probe:
+    image: python:3.12-alpine
+    restart: unless-stopped
+    command: ['python', '/metrics/dns_probe.py']
+    environment:
+      DNS_PROBE_HOSTS: ${DNS_PROBE_HOSTS:-signara.innotel.us,app.signara.innotel.us,api.signara.innotel.us,auth.signara.innotel.us,admin.signara.innotel.us,storage.signara.innotel.us,subscribe.signara.innotel.us}
+      # The address the names must resolve to; leaves resolution alone when unset.
+      DNS_PROBE_EXPECTED_ADDRESS: ${CERULEAN_WAN_IP:-}
+    volumes:
+      - ./infra/monitoring/dns_probe.py:/metrics/dns_probe.py:ro
+    expose:
+      - '9102'
+    logging: *logging-default
+
 volumes:
   pgdata:
   redisdata:

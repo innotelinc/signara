@@ -17,7 +17,7 @@ services:
   # Observability + backup are opt-in (they are otherwise in the default set
   # and cost ~2 GB on modest hosts). Start with:
   #   docker compose -f docker-compose.prod.yml -f docker-compose.override.prod.yml \
-  #     --profile monitoring up -d prometheus alertmanager backup backup-metrics
+  #     --profile monitoring up -d prometheus alertmanager backup backup-metrics dns-probe
   prometheus:
     profiles: ['monitoring']
   alertmanager:
@@ -37,4 +37,6 @@ services:
     environment:
       AUTHENTIK_POSTGRES_PASSWORD: ""
   backup-metrics:
+    profiles: ['monitoring']
+  dns-probe:
     profiles: ['monitoring']

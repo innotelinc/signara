@@ -26,6 +26,12 @@
 
 # - Backup failures
 
+# - Public hostname resolution (dns_probe.py): the names can stop resolving
+
+#   while the API, the edge and the certificate all stay healthy, so nothing else
+
+#   here would notice
+
 #
 
 # There is no dashboards or log-search service here: Grafana and Loki were

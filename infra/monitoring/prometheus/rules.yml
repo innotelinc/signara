@@ -1,7 +1,7 @@
 # ==========================================================================
 # Signara alert rules
 # Categories: API failures, queue failures, certificate expiration, backup
-# failures.
+# failures, public hostname resolution.
 #
 # There is no object-storage category. MinIO was retired as the primary store
 # (docs/Roadmap.md W3) and the store that replaced it exposes no metrics, so a
@@ -207,3 +207,56 @@ groups:
         annotations:
           summary: 'An off-host mirror is configured but has never completed'
           description: 'BACKUP_S3_ENDPOINT is set, yet no run has ever mirrored a backup successfully. Check the backup logs for the failure, or unset the mirror so the gap is at least honest.'
+
+  - name: signara-dns
+    rules:
+      # Nothing else in this file can see this failure. The API answers on its host,
+      # the edge serves a valid certificate, Prometheus scrapes both happily — and
+      # no browser can connect, because the public name points at nothing. That is
+      # what happened on 2026-10-15: the host A records were removed from the zone,
+      # the zone, edge and certificate all stayed healthy, and the outage was
+      # discovered by a person getting "this site can't be reached".
+      #
+      # The probe (infra/monitoring/dns_probe.py) resolves each name on every
+      # scrape, so a record that disappears surfaces here within a scrape interval
+      # instead of in a support ticket.
+      #
+      # The host-labelled side is the *left* operand, deliberately: Prometheus takes
+      # an alert's `$value` and `$labels` from the left operand, and the annotation
+      # below renders `{{ $labels.host }}`. With the configured-flag first there
+      # would be no host to name and this alert would read as a vague site-wide
+      # failure — the one detail it exists to supply. `on()` matches on the flag
+      # alone, as in the backup group.
+      #
+      # Gated on `configured`, in the same spirit as `identity_expected`: a stack
+      # that does not set DNS_PROBE_HOSTS is not a coverage gap and must not read as
+      # one, rather than firing forever on a probe that was never asked to watch
+      # anything.
+      - alert: SignaraHostnameNotResolving
+        expr: signara_dns_host_matches == 0 and on() signara_dns_probe_configured == 1
+        for: 10m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: 'Signara hostname {{ $labels.host }} no longer resolves'
+          description: '{{ $labels.host }} no longer resolves to {{ $labels.expected }}, so the service is unreachable for every user even though the API, the edge and the certificate are healthy. Check the zone the name lives in (docs/Deployment.md §2, "When a Signara hostname stops resolving") — a record that vanished is the usual cause, and provisioning will not recreate it while it believes the record is unchanged.'
+
+      # A probe that stopped reporting looks exactly like a probe that has nothing
+      # to report, and the difference is whether anyone would be told.
+      #
+      # `critical`, not `warning`, and that is the whole point: this estate routes
+      # `severity = warning` to the silent receiver (docs/Deployment.md §Monitoring),
+      # so a warning here would be visible in the UI and mailed to nobody. A dead
+      # probe means the alert above can never fire, which is a blind spot on the
+      # public names — the same reasoning that makes ApiUnavailable critical rather
+      # than a line in a log.
+      - alert: SignaraDnsProbeUnavailable
+        expr: up{job="signara-dns-probe"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: 'The DNS probe is not reporting'
+          description: 'Prometheus cannot scrape the DNS probe ({{ $labels.instance }}), so a hostname that stops resolving would go unnoticed until a user reported it.'

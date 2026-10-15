@@ -33,6 +33,16 @@ scrape_configs:
         labels:
           service: signara-backup
 
+  # Resolves the public hostnames on every scrape. Deliberately not a blackbox
+  # probe of the edge: the failure worth catching is the names themselves going
+  # away, which leaves the edge and its certificate perfectly healthy.
+  - job_name: 'signara-dns-probe'
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['dns-probe:9102']
+        labels:
+          service: signara-dns
+
   # There is deliberately no scrape job for object storage. MinIO was retired
   # as the primary store (docs/Roadmap.md W3) and is profile-gated behind
   # `legacy-storage`, so its target could only ever be down — a permanently
