@@ -127,9 +127,28 @@ backup_database() {
   local name="$1" host="$2" user="$3" password="$4" database="$5"
   local output="$BACKUP_DIR/${name}-${TIMESTAMP}.dump"
   log "Dumping $name PostgreSQL database..."
-  PGPASSWORD="$password" pg_dump \
-    -h "$host" -U "$user" -d "$database" \
-    -Fc --no-owner --file "$output"
+  # A database that is still replaying its WAL answers "the database system is
+  # starting up", and one that has just restarted answers "connection refused".
+  # `depends_on: service_healthy` is evaluated once, when this container starts,
+  # so neither is excluded by it — and the run that loses the race records a
+  # failure that stays on the dashboard until the next daily attempt. Retry for a
+  # bounded minute: a backup that is a minute late is fine, a backup that is a
+  # day late is the alert.
+  local attempt
+  for attempt in $(seq 1 30); do
+    if PGPASSWORD="$password" pg_dump \
+      -h "$host" -U "$user" -d "$database" \
+      -Fc --no-owner --file "$output"; then
+      return 0
+    fi
+    rm -f "$output"
+    if (( attempt == 30 )); then
+      log "Dumping $name failed after $attempt attempts"
+      return 1
+    fi
+    log "Dumping $name failed (attempt $attempt/30); retrying in 2s..."
+    sleep 2
+  done
 }
 
 backup_database "db" "${POSTGRES_HOST:-postgres}" "${POSTGRES_USER:-signara}" \
