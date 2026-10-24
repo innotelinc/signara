@@ -172,9 +172,16 @@ setting the envelope to anything the relay did not authenticate gets every
 signing mail refused with `501 5.5.4 You are not allowed to send from this
 address`.
 A `warning` is evaluated and stays visible in the Alertmanager UI, but it is not
-mailed: the route sends `severity = warning` to the `silent` receiver, because the
-estate's periodic probes all fire as warnings and mailing each one trained the
-reader to ignore the mailbox. If the SMTP variables are unset the stack still
+mailed: the route sends `severity != critical` to the `silent` receiver, because
+the estate's periodic probes all fire as warnings and mailing each one trained the
+reader to ignore the mailbox. The delivery probe (`EstateDeliveryProbe*`) is the
+one exception, matched by name before that route: it goes to the `probe` receiver,
+which mails `SMTP_USER` — the alerts account on the relay, not this human inbox —
+and does not send a resolution. That is what keeps the receiver's live proof of
+delivery (`check-alert-delivery.py` in `innotelinc/innotel-platform-stack`, which
+reads the mail server's log rather than a mailbox) without paying for it with a
+page: the 2026-10-20 attempt silenced the probe outright, which left the proof —
+and the check that runs it — with nowhere to go. If the SMTP variables are unset the stack still
 evaluates rules and shows them in the UI, and the container says so at start — but
 nobody is told, so set them.
 

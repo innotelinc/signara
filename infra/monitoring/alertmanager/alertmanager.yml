@@ -41,27 +41,36 @@ route:
   group_wait: 30s
   group_interval: 5m
   repeat_interval: 4h
-  # Warnings are evaluated and stay visible in the UI, but they are not mailed:
-  # the estate's periodic probes all fire as `severity=warning`, and mailing every
-  # one of them trained the reader to ignore the mailbox. Only `critical` still
-  # pages — an alert that matches no sub-route keeps the top-level `email` receiver.
+  # Only `critical` is mailed. Everything else — `warning`, `info`, and an alert
+  # with no severity label at all — is evaluated, stays visible in the UI, and is
+  # silent. Silencing `warning` alone was not enough: the estate's periodic probes
+  # fire as `warning`, but a rule without a severity label fell through to the
+  # top-level `email` receiver as if it were a page.
   #
-  # The delivery probe is the one exception, and it is the reason the mailbox is
-  # worth trusting: `ips/scripts/check-alert-delivery.py` injects it on a timer and
-  # reads the mail server for the delivery, so a route that silences it leaves the
-  # estate unable to tell a working receiver from a configured one — the state this
-  # receiver sat in for its whole life before 2026-10-02, with `amtool check-config`
-  # saying SUCCESS. It was silenced here from 2026-10-12 until 2026-10-15, and the
-  # check kept "passing" in that window by matching a *different* mail that happened
-  # to arrive inside its 90 s — a resolution of an unrelated alert. Matched before
-  # the warning route, by the name only a probe carries, so the exception has one
-  # owner rather than being a general carve-out for anything named like a test.
+  # `severity != critical` rather than `severity = warning` on purpose: a missing
+  # label is an unclassified alert, and the mailbox is for the pages somebody must
+  # act on today. The top-level `email` receiver is then reached only by a critical.
+  #
+  # The delivery probe (`check-alert-delivery.py` in `innotel-platform-stack`,
+  # alertname `EstateDeliveryProbe*`) is the one exception, and it is why the
+  # mailbox above is worth trusting. It fires as `warning`, so it does *not* go to
+  # the human inbox: it goes to the `probe` receiver, which mails `SMTP_USER` — the
+  # alerts account on the relay. A proof of delivery that mails the reader every
+  # half hour trains the reader to ignore the mailbox, which is how a real page
+  # gets missed; a proof that mails a machine account costs nobody anything, and
+  # the check reads the mail server's log rather than an inbox, so it needs no one
+  # to open it.
+  #
+  # This is the arrangement the 2026-10-20 change was reaching for: it silenced the
+  # probe (and the check with it) because the only mailbox it had was the human
+  # one. Matched on the probe's name before the severity route, so the exception has
+  # one owner rather than being a general carve-out for anything named like a test.
   routes:
     - matchers:
         - alertname =~ "EstateDeliveryProbe.*"
-      receiver: email
+      receiver: probe
     - matchers:
-        - severity = warning
+        - severity != critical
       receiver: silent
 
 receivers:
@@ -93,8 +102,26 @@ receivers:
         headers:
           Subject: '{{ template "signara.email.subject" . }}'
 
+  # Reached only by the delivery probe: the alerts account itself, which nobody
+  # reads. `send_resolved` is off — the probe is injected with an `--end` a few
+  # minutes out, so it resolves by design and its resolution is not news. The rest
+  # matches the `email` receiver, including the certificate check, because this is
+  # the route whose failure the check exists to notice.
+  - name: probe
+    email_configs:
+      - to: '${SMTP_USER}'
+        hello: '${SMTP_HELLO}'
+        tls_config:
+          server_name: '${SMTP_TLS_SERVERNAME}'
+          insecure_skip_verify: ${SMTP_TLS_INSECURE}
+        send_resolved: false
+        html: '{{ template "signara.email.html" . }}'
+        text: '{{ template "signara.email.text" . }}'
+        headers:
+          Subject: '{{ template "signara.email.subject" . }}'
+
   # Routes to here notify nobody — the receiver carries no integration configs.
-  # That is what keeps a warning in the UI without sending mail for it.
+  # That is what keeps a non-critical alert in the UI without sending mail for it.
   - name: silent
 
 inhibit_rules:
