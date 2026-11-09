@@ -84,7 +84,7 @@ jobs:
 
       - name: Generate SBOM (syft)
         if: github.event_name != 'pull_request'
-        uses: anchore/sbom-action@v0.24.2
+        uses: anchore/sbom-action@v0.24.3
         with:
           image: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-${{ matrix.service }}:sha-${{ github.sha }}
           format: spdx-json
