@@ -21,7 +21,11 @@
 #   container missing / exited / dead  -> `up -d --no-deps <service>`
 #   running but unhealthy for N        -> `up -d --force-recreate --no-deps`
 #   consecutive healthchecks
+#   paused (cgroup-frozen)             -> `docker unpause`, then recreate
 #   one-shot that exited non-zero      -> `up -d --no-deps migrate`
+#   AppArmor profile missing or drifted -> reinstall from `infra/`, reload it,
+#                                         and restore `apparmor-profile` in the
+#                                         daemon config if it was lost
 #
 # A container whose healthcheck is still `starting` is left alone, so a slow
 # boot is not punished. Afterwards it asserts the stack answers: postgres via
@@ -97,6 +101,89 @@ fails_of() { field "$1" '{{if .State.Health}}{{.State.Health.FailingStreak}}{{el
 DEFINED=$(compose config --services 2>/dev/null)
 
 defined() { printf '%s\n' "$DEFINED" | grep -qx "$1"; }
+
+# ── confinement ─────────────────────────────────────────────────────────────
+# The AppArmor profile is what stops the wedge this script exists for, and it
+# lives outside the compose project — so a rebuilt container loses it and the
+# outage returns looking exactly like a database problem. The tracked copies in
+# `infra/` are the source of truth: drift is repaired from them, never the
+# reverse, and a profile this script cannot fix is a failure, not a log line.
+PROFILE_SRC=$COMPOSE_DIR/infra/apparmor/docker-default-signara
+PROFILE_DST=/etc/apparmor.d/docker-default-signara
+DAEMON_SRC=$COMPOSE_DIR/infra/docker/daemon.json
+DAEMON_DST=/etc/docker/daemon.json
+
+merge_daemon() {
+  # Merge the tracked key into the live file instead of replacing it: the live
+  # file carries this host's registry mirrors, and dropping them breaks pulls.
+  cp -n "$DAEMON_DST" "$DAEMON_DST.bak-$(date +%s)" 2>/dev/null || true
+  python3 - "$DAEMON_DST" "$DAEMON_SRC" <<'PY'
+import json, sys
+live, src = sys.argv[1], sys.argv[2]
+try:
+    current = json.load(open(live))
+except Exception:
+    current = {}
+wanted = json.load(open(src))
+current["apparmor-profile"] = wanted["apparmor-profile"]
+with open(live, "w") as handle:
+    json.dump(current, handle, indent=2)
+    handle.write("\n")
+PY
+}
+
+confine() {
+  local drift="" loaded
+  [ -f "$PROFILE_SRC" ] || {
+    log "confinement: no tracked profile at $PROFILE_SRC"
+    return 1
+  }
+
+  cmp -s "$PROFILE_SRC" "$PROFILE_DST" 2>/dev/null || drift="$drift profile-file"
+  grep -q 'apparmor-profile' "$DAEMON_DST" 2>/dev/null || drift="$drift daemon-config"
+  loaded=$(grep '^docker-default ' /sys/kernel/security/apparmor/profiles 2>/dev/null | head -1)
+  [ "$loaded" = "docker-default (complain)" ] || drift="$drift profile-loaded"
+
+  if [ -z "$drift" ]; then
+    [ "$VERBOSE" = 1 ] && log "confinement: docker-default (complain)"
+    return 0
+  fi
+
+  log "confinement: drift in:$drift"
+  [ "$MODE" = check ] && return 1
+
+  if printf '%s' "$drift" | grep -q profile-file; then
+    install -m 0644 "$PROFILE_SRC" "$PROFILE_DST" || {
+      log "confinement: could not install the tracked profile"
+      return 1
+    }
+  fi
+
+  apparmor_parser -r "$PROFILE_DST" >/dev/null 2>&1 || {
+    log "confinement: apparmor_parser refused $PROFILE_DST"
+    return 1
+  }
+
+  if printf '%s' "$drift" | grep -q daemon-config; then
+    if ! merge_daemon; then
+      log "confinement: could not merge apparmor-profile into $DAEMON_DST"
+      return 1
+    fi
+    log "confinement: daemon config updated; restarting docker (live-restore keeps containers up)"
+    systemctl restart docker >/dev/null 2>&1 || {
+      log "confinement: docker restart failed"
+      return 1
+    }
+  fi
+
+  loaded=$(grep '^docker-default ' /sys/kernel/security/apparmor/profiles 2>/dev/null | head -1)
+  if [ "$loaded" != "docker-default (complain)" ]; then
+    log "confinement: still '${loaded:-none}' after repair"
+    return 1
+  fi
+  log "confinement: repaired; docker-default (complain)"
+  return 0
+}
 
 repair() {
   local svc=$1 c st h f procs rc
@@ -181,6 +268,9 @@ repair() {
 }
 
 broken=0
+# Before the services: repairing them under a profile that denies signals is a
+# restart loop with a misleading log, which is the failure being healed.
+confine || broken=1
 for svc in $SERVICES; do
   repair "$svc" || broken=1
 done

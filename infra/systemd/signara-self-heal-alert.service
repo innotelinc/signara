@@ -1,0 +1,24 @@
+[Unit]
+Description=Raise a Signara self-heal failure in Alertmanager
+Documentation=file:///usr/src/projects/complete/1-primary/signara/docs/self-healing.md
+After=signara-self-heal.service alertmanager.service
+
+[Service]
+Type=oneshot
+# Started by `OnFailure=` on signara-self-heal.service, which means the healer ran
+# and the stack still does not answer. The estate already delivers through this
+# Alertmanager (it routes to ntfy for the other checks), so the failure is
+# published on that path rather than left in `systemctl --failed` for whoever
+# happens to look at the box.
+#
+# The alert is posted straight to the API rather than derived from a scrape: the
+# healer is a timer job with no /metrics of its own, and a metrics rule would only
+# notice a *stale* heal, not a failing one.
+#
+# The payload is a file, not an inline heredoc: systemd joins `\` continuation
+# lines into one line, and a heredoc needs its newlines, so an inline body is a
+# unit that parses and then sends nothing. `curl -f` makes a refused POST a failed
+# unit too — an alert that cannot be delivered is not a silent success.
+ExecStart=/bin/sh -c 'exec curl -fsS -m 10 -X POST http://127.0.0.1:9093/api/v2/alerts -H "Content-Type: application/json" --data-binary @/etc/signara-self-heal-alert.json'
+
+TimeoutStartSec=30

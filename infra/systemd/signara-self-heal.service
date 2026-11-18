@@ -3,6 +3,10 @@ Description=Repair the Signara stack when a container hangs instead of exiting
 Documentation=file:///usr/src/projects/complete/1-primary/signara/docs/self-healing.md
 After=docker.service network-online.target
 Requires=docker.service
+# A failed repair is an incident, not a unit state: hand it to Alertmanager so it
+# reaches the same place every other estate alert does.
+OnFailure=signara-self-heal-alert.service
+StartLimitIntervalSec=0
 
 [Service]
 Type=oneshot

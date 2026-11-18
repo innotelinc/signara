@@ -84,9 +84,11 @@ Verified on 2026-11-18 after the change:
 | Found | Action |
 |---|---|
 | container missing, exited, created, dead | `up -d --no-deps <service>` |
+| paused (frozen by the cgroup freezer) | `docker unpause`, then `up -d --force-recreate --no-deps` — `up -d` cannot start a paused container, so the start branch above provably does not work here |
 | running, healthcheck `unhealthy` for ≥3 consecutive checks | `up -d --force-recreate --no-deps <service>` |
 | `migrate` exited non-zero | re-run `up -d --no-deps migrate` |
 | healthcheck `starting` | nothing — a slow boot is not a fault |
+| AppArmor profile missing, drifted from `infra/`, or not loaded in complain | reinstall from `infra/apparmor/`, `apparmor_parser -r`, and restore `apparmor-profile` in the daemon config (restarting docker if it had to change) |
 
 It walks dependencies first (`postgres`, `redis`, `meilisearch`, `migrate`,
 `api`, `frontend`, then the monitoring services), then **asserts** readiness
@@ -106,6 +108,25 @@ bash scripts/self-heal.sh --check              # report only, change nothing
 bash scripts/self-heal.sh --verbose            # what every service looked like
 ```
 
+## Failing loudly
+
+A healer that cannot heal is an incident, so a non-zero exit starts
+`signara-self-heal-alert.service` by `OnFailure=`, which posts a
+`SignaraSelfHealFailed` alert (severity `critical`) to the stack's Alertmanager at
+`127.0.0.1:9093`. That is the same delivery path the estate's other checks use, so
+the failure reaches ntfy and whoever is on call instead of sitting in
+`systemctl --failed` until someone looks.
+
+```sh
+systemctl start signara-self-heal-alert.service     # prove the path
+curl -s 127.0.0.1:9093/api/v2/alerts | head           # it is now visible
+journalctl -u signara-self-heal-alert -n 20          # a refused POST is a failed unit
+```
+
+The alert is not resolved automatically: the next successful heal does not clear
+it, because a human should see that it fired at all. Resolve it in Alertmanager
+once the cause is understood.
+
 ## What it does not cover
 
 - **Bad application code**, wrong credentials, or a failing migration: the healer
@@ -114,10 +135,17 @@ bash scripts/self-heal.sh --verbose            # what every service looked like
 - **A healthcheck that lies.** The healer trusts the healthcheck to define
   "serving". `postgres`'s `pg_isready` and the API's `/ready` are honest, but a
   service with a shallow probe could be recreated forever without improving.
-- **The host**, including this AppArmor profile. It runs inside the `signara`
-  container and cannot fix the Incus container, the Docker daemon, or the profile
-  the daemon loaded. A host-level fault shows up as every repair failing, which
-  the unit's exit status reports. This is precisely why the signal denial above
-  would not have healed itself: the diagnosis, not the restart, was the fix.
+- **The host outside this container.** It runs inside the `signara` container,
+  so it cannot fix Incus, the kernel, or a Docker daemon that refuses to start.
+  It *can* and does restore the AppArmor profile and the daemon's
+  `apparmor-profile` key from the tracked copies, because those are files this
+  container owns and the fault that started all of this. What it cannot do is
+  diagnose a new one: it repairs known drift, it does not explain novel denial.
+  That is precisely why the original signal denial would not have healed itself
+  — the diagnosis, not the restart, was the fix.
+- **Names that are not files.** A profile renamed in `daemon.json` but deleted
+  from `/etc/apparmor.d`, or one loaded from a path other than the tracked one,
+  is reported as drift and repaired only in the direction the repository
+  describes; the journal names what it changed rather than assuming it was right.
 - **Data loss.** It deliberately has no path that deletes a volume, so a corrupt
   database is restored from `infra/backup`, not self-healed.

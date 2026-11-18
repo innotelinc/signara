@@ -1,0 +1,15 @@
+[
+  {
+    "labels": {
+      "alertname": "SignaraSelfHealFailed",
+      "severity": "critical",
+      "service": "signara",
+      "job": "signara-self-heal"
+    },
+    "annotations": {
+      "summary": "The Signara healer could not make the stack serve",
+      "description": "signara-self-heal.sh exited non-zero: postgres or the API still does not answer after a repair. journalctl -t signara-self-heal -n 50 names the service it could not bring back.",
+      "runbook": "https://github.com/innotelinc/signara/blob/main/docs/self-healing.md"
+    }
+  }
+]
