@@ -1,0 +1,10 @@
+{
+  "registry-mirrors": [
+    "http://192.168.1.79:5000"
+  ],
+  "insecure-registries": [
+    "192.168.1.79:5000"
+  ],
+  "live-restore": true,
+  "apparmor-profile": "/etc/apparmor.d/docker-default-signara"
+}

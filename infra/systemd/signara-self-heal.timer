@@ -1,0 +1,11 @@
+[Unit]
+Description=Periodically heal the Signara stack
+
+[Timer]
+OnBootSec=120s
+OnUnitActiveSec=2min
+AccuracySec=15s
+Unit=signara-self-heal.service
+
+[Install]
+WantedBy=timers.target

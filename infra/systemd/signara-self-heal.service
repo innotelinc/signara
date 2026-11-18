@@ -1,0 +1,13 @@
+[Unit]
+Description=Repair the Signara stack when a container hangs instead of exiting
+Documentation=file:///usr/src/projects/complete/1-primary/signara/docs/self-healing.md
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /usr/src/projects/complete/1-primary/signara/scripts/self-heal.sh
+# A full heal recreates at most postgres and the API and waits for both, so it
+# needs more than the timer's two minutes only when something is genuinely slow.
+TimeoutStartSec=300
+Nice=5

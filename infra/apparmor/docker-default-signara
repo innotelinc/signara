@@ -1,0 +1,40 @@
+#include <tunables/global>
+
+# Replaces docker-default for this Docker daemon (daemon.json: apparmor-profile).
+#
+# Why: under nested incus the container's peer label is namespaced
+# (`docker-default//&unconfined`), while the stock docker-default allows a signal
+# only to a peer named exactly `docker-default`. So a container could not signal
+# its own processes. For postgres that meant:
+#
+#   FATAL: could not signal for checkpoint: Permission denied
+#   pg_ctl: could not send stop signal (PID: 53): Permission denied
+#
+# and the kernel said why:
+#
+#   apparmor="DENIED" operation="signal" namespace="root//incus-signara_<var-lib-incus>"
+#   profile="docker-default" pid=… comm="postgres" requested_mask="send"
+#   signal=urg peer="docker-default//&unconfined"
+#
+# The same denial is what wedged the postgres image's `gosu` privilege drop: Go's
+# drop signals its own threads, the signal was denied, and it retried forever at
+# ~100% CPU without ever exec'ing postgres — a container that is `running`, logs
+# nothing, and serves nothing.
+#
+# complain means the rules are audited, never enforced: the outcome is the same
+# as allowing them, but a denial still appears in the audit log, so this is not a
+# blind spot. This is the same posture monarch runs.
+profile docker-default flags=(complain,attach_disconnected,mediate_deleted) {
+  #include <abstractions/base>
+  capability,
+  network,
+  mount,
+  remount,
+  umount,
+  pivot_root,
+  ptrace,
+  signal,
+  dbus,
+  unix,
+  file,
+}
