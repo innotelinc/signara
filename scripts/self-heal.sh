@@ -114,6 +114,21 @@ repair() {
     return 0
   fi
 
+  # A paused container is frozen by the cgroup freezer: `Status` is not even
+  # `running`, nothing can exec into it, and `up -d` refuses to touch it, so the
+  # start branch below cannot work. It is the same fault class — up, serving
+  # nothing — so it is unfrozen and recreated instead of started.
+  if [ "$(field "$c" '{{.State.Paused}}')" = "true" ]; then
+    log "$svc: container is paused (frozen); unpausing and recreating"
+    [ "$MODE" = check ] && return 1
+    docker unpause "$c" >/dev/null 2>&1
+    compose up -d --force-recreate --no-deps "$svc" >/dev/null 2>&1 || {
+      log "$svc: recreate after unpause failed"
+      return 1
+    }
+    return 0
+  fi
+
   if [ "$svc" = migrate ]; then
     case "$st" in
       exited)
