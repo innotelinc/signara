@@ -1,3 +1,22 @@
+import { readFileSync } from 'node:fs';
+/**
+ * Credential from a mounted file when the deployment names one, else the plain
+ * variable. Docker secrets land as files (`SMTP_PASS_FILE=/run/secrets/...`), so
+ * the value never shows up in `docker inspect`; a deployment that only sets the
+ * variable behaves exactly as before.
+ */
+function readSecret(name: string): string {
+  const file = process.env[`${name}_FILE`];
+  if (file) {
+    try {
+      return readFileSync(file, 'utf8').trim();
+    } catch {
+      return process.env[name] ?? '';
+    }
+  }
+  return process.env[name] ?? '';
+}
+
 export default () => ({
   env: process.env.NODE_ENV ?? 'development',
   app: {
@@ -91,7 +110,7 @@ export default () => ({
     port: Number(process.env.SMTP_PORT ?? 587),
     secure: process.env.SMTP_SECURE, // 'true' = implicit TLS (SMTPS); unset → port 465 implies TLS
     user: process.env.SMTP_USER ?? '',
-    pass: process.env.SMTP_PASS ?? '',
+    pass: readSecret('SMTP_PASS'),
     // The product's own sender identity. SMTP_FROM cannot serve both jobs: it is
     // the mailbox Alertmanager sends as (the alerts address), and an invitation
     // arriving from "Signara Alerts <alertmanager@…>" is the wrong artefact

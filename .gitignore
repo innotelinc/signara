@@ -11,6 +11,13 @@ out/
 coverage/
 *.tsbuildinfo
 
+# The SMTP submission password is a deployment file, not a repository file.
+# `docker compose` mounts ./infra/secrets/smtp_password into alertmanager and the
+# api; infra/secrets/README.md says how to create it. Ignored so a `git add -A`
+# on this checkout cannot commit a live credential.
+infra/secrets/*
+!infra/secrets/README.md
+
 # Environment & secrets
 .env
 .env.*

@@ -37,29 +37,42 @@ View in Alertmanager: {{ .ExternalURL }}
 {{- define "signara.email.html" -}}
 <!DOCTYPE html>
 <html>
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="margin:0;padding:24px;background:#0b0d12;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#e8e6e1;">
-  <div style="max-width:640px;margin:0 auto;background:#131722;border:1px solid #2a2f3a;border-radius:10px;overflow:hidden;">
-    <div style="padding:16px 20px;border-bottom:1px solid #2a2f3a;">
-      <div style="font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:#c8a96a;">Monarch · Estate Monitoring</div>
-      <div style="font-size:19px;font-weight:600;margin-top:6px;">
-        {{ if eq .Status "firing" }}<span style="color:#e0654f;">&#9679; Firing</span>{{ else }}<span style="color:#5fbf7f;">&#10003; Resolved</span>{{ end }}
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  {{/* Light only, deliberately. This body was dark (`#0b0d12` on light text) and
+       arrived in clients that render HTML mail on their own white canvas — a
+       black card with black-on-white text, unreadable. A light body with dark
+       text needs no client cooperation; asking for light also stops the clients
+       that force-invert dark mail from inverting this one into the same
+       contrast failure. Every colour is inline as well as in the meta, because
+       several clients drop <head> entirely. */}}
+  <meta name="color-scheme" content="light">
+  <meta name="supported-color-schemes" content="light">
+  <title>{{ template "signara.email.subject" . }}</title>
+</head>
+<body bgcolor="#f4f5f7" style="margin:0;padding:24px;background-color:#f4f5f7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1b1f27;">
+  <div style="max-width:640px;margin:0 auto;background-color:#ffffff;border:1px solid #e3e5ea;border-radius:10px;overflow:hidden;">
+    <div style="padding:16px 20px;border-bottom:1px solid #e3e5ea;">
+      <div style="font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:#8a6a22;">Monarch · Estate Monitoring</div>
+      <div style="font-size:19px;font-weight:600;margin-top:6px;color:#1b1f27;">
+        {{ if eq .Status "firing" }}<span style="color:#b42318;">&#9679; Firing</span>{{ else }}<span style="color:#177245;">&#10003; Resolved</span>{{ end }}
         <span>{{ .CommonLabels.alertname }}</span>
       </div>
-      {{ with .CommonLabels.severity }}<div style="color:#9aa2b1;font-size:13px;margin-top:4px;">severity: {{ . }}{{ with $.CommonLabels.service }} &middot; service: {{ . }}{{ end }}</div>{{ end }}
+      {{ with .CommonLabels.severity }}<div style="color:#5b6472;font-size:13px;margin-top:4px;">severity: {{ . }}{{ with $.CommonLabels.service }} &middot; service: {{ . }}{{ end }}</div>{{ end }}
     </div>
     {{ range .Alerts }}
-    <div style="padding:14px 20px;border-bottom:1px solid #212734;">
-      <div style="font-weight:600;margin-bottom:4px;">{{ .Labels.alertname }}</div>
-      {{ with .Annotations.summary }}<div style="font-size:14px;">{{ . }}</div>{{ end }}
-      {{ with .Annotations.description }}<div style="font-size:13px;color:#9aa2b1;margin-top:4px;">{{ . }}</div>{{ end }}
-      <div style="font-size:12px;color:#7f8794;margin-top:8px;">
+    <div style="padding:14px 20px;border-bottom:1px solid #eceef2;">
+      <div style="font-weight:600;margin-bottom:4px;color:#1b1f27;">{{ .Labels.alertname }}</div>
+      {{ with .Annotations.summary }}<div style="font-size:14px;color:#1b1f27;">{{ . }}</div>{{ end }}
+      {{ with .Annotations.description }}<div style="font-size:13px;color:#5b6472;margin-top:4px;">{{ . }}</div>{{ end }}
+      <div style="font-size:12px;color:#6b7482;margin-top:8px;">
         {{ with .Labels.severity }}severity {{ . }}{{ end }}{{ with .Labels.service }} &middot; service {{ . }}{{ end }}{{ if .StartsAt }} &middot; since {{ .StartsAt.Format "2006-01-02 15:04 MST" }}{{ end }}
       </div>
     </div>
     {{ end }}
-    <div style="padding:14px 20px;font-size:13px;">
-      <a href="{{ .ExternalURL }}" style="color:#c8a96a;text-decoration:none;">Open in Alertmanager &rarr;</a>
+    <div style="padding:14px 20px;font-size:13px;background-color:#ffffff;">
+      <a href="{{ .ExternalURL }}" style="color:#8a6a22;text-decoration:none;">Open in Alertmanager &rarr;</a>
     </div>
   </div>
 </body>

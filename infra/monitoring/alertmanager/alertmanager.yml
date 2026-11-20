@@ -25,7 +25,7 @@ global:
   smtp_smarthost: '${SMTP_HOST}:${SMTP_PORT}'
   smtp_from: '${SMTP_FROM}'
   smtp_auth_username: '${SMTP_USER}'
-  smtp_auth_password: '${SMTP_PASS}'
+  smtp_auth_password_file: '/run/secrets/smtp_password'
   smtp_require_tls: true
 
 # Notification body. Without this Alertmanager sends its default email — a bare
@@ -37,7 +37,12 @@ templates:
 
 route:
   receiver: email
-  group_by: ['alertname', 'cluster', 'service']
+  # Grouped by name and cluster, not by service: the 2026-11-18 outage produced one
+  # `EstateCheckAbsent` per check with a different `service`, and grouping by service
+  # turned one broken metrics path into 39 separate mails. One mail that lists them is
+  # the same information and one page. A per-route `group_by` is not accepted here
+  # (`amtool check-config` refuses it on this version), which is why it is set once.
+  group_by: ['alertname', 'cluster']
   group_wait: 30s
   group_interval: 5m
   repeat_interval: 4h
@@ -51,24 +56,36 @@ route:
   # label is an unclassified alert, and the mailbox is for the pages somebody must
   # act on today. The top-level `email` receiver is then reached only by a critical.
   #
-  # The delivery probe (`check-alert-delivery.py` in `innotel-platform-stack`,
-  # alertname `EstateDeliveryProbe*`) is the one exception, and it is why the
-  # mailbox above is worth trusting. It fires as `warning`, so it does *not* go to
-  # the human inbox: it goes to the `probe` receiver, which mails `SMTP_USER` — the
-  # alerts account on the relay. A proof of delivery that mails the reader every
-  # half hour trains the reader to ignore the mailbox, which is how a real page
-  # gets missed; a proof that mails a machine account costs nobody anything, and
-  # the check reads the mail server's log rather than an inbox, so it needs no one
-  # to open it.
-  #
-  # This is the arrangement the 2026-10-20 change was reaching for: it silenced the
-  # probe (and the check with it) because the only mailbox it had was the human
-  # one. Matched on the probe's name before the severity route, so the exception has
-  # one owner rather than being a general carve-out for anything named like a test.
+  # The delivery probe is the one exception, and it is the reason the mailbox is
+  # worth trusting: `ips/scripts/check-alert-delivery.py` injects it on a timer and
+  # reads the mail server for the delivery, so a route that silences it leaves the
+  # estate unable to tell a working receiver from a configured one — the state this
+  # receiver sat in for its whole life before 2026-10-02, with `amtool check-config`
+  # saying SUCCESS. It was silenced here from 2026-10-12 until 2026-10-15, and the
+  # check kept "passing" in that window by matching a *different* mail that happened
+  # to arrive inside its 90 s — a resolution of an unrelated alert. Matched before
+  # the warning route, by the name only a probe carries, so the exception has one
+  # owner rather than being a general carve-out for anything named like a test.
   routes:
+    # The probe proves the path works; it must not prove it by mailing a person every
+    # half hour. It goes to the alerts account on the relay, which is what the delivery
+    # check reads, so a working receiver stays provable and the human inbox stays for
+    # things somebody has to act on. (The mailbox is reachable mail, not a black hole:
+    # `check-alert-delivery.py` reads the delivery from the mail server's own log.)
     - matchers:
         - alertname =~ "EstateDeliveryProbe.*"
       receiver: probe
+    # "A check has never reported" is one condition with as many names as there are
+    # checks: the textfile collector, or the Prometheus that scrapes it, is down, so
+    # every check's series is missing at once. Grouped by alertname and cluster this is
+    # a single mail that lists them; grouped by service it was 39 mails in one run
+    # (measured 2026-11-18), which is how a real page gets buried. Slower repeat on
+    # purpose: the condition is measured in half-hours, not minutes.
+    - matchers:
+        - alertname = "EstateCheckAbsent"
+      receiver: email
+      group_interval: 30m
+      repeat_interval: 12h
     - matchers:
         - severity != critical
       receiver: silent
@@ -102,11 +119,9 @@ receivers:
         headers:
           Subject: '{{ template "signara.email.subject" . }}'
 
-  # Reached only by the delivery probe: the alerts account itself, which nobody
-  # reads. `send_resolved` is off — the probe is injected with an `--end` a few
-  # minutes out, so it resolves by design and its resolution is not news. The rest
-  # matches the `email` receiver, including the certificate check, because this is
-  # the route whose failure the check exists to notice.
+  # The delivery probe's destination: the alerts account itself. Same relay, same
+  # sender, same verification as the human receiver — only the envelope differs, so a
+  # proof of delivery costs the reader nothing.
   - name: probe
     email_configs:
       - to: '${SMTP_USER}'
@@ -115,8 +130,6 @@ receivers:
           server_name: '${SMTP_TLS_SERVERNAME}'
           insecure_skip_verify: ${SMTP_TLS_INSECURE}
         send_resolved: false
-        html: '{{ template "signara.email.html" . }}'
-        text: '{{ template "signara.email.text" . }}'
         headers:
           Subject: '{{ template "signara.email.subject" . }}'
 

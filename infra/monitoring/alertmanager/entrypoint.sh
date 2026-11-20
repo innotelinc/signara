@@ -20,7 +20,6 @@ warn() { echo "alertmanager-entrypoint: $*" >&2; }
 : "${SMTP_HOST:=}"
 : "${SMTP_PORT:=587}"
 : "${SMTP_USER:=}"
-: "${SMTP_PASS:=}"
 : "${SMTP_FROM:=}"
 : "${ALERT_EMAIL_TO:=}"
 # The FQDN Alertmanager says EHLO with. A single label (`localhost`, or the
@@ -79,7 +78,6 @@ sed \
   -e "s|\${SMTP_HOST}|$(escape "$SMTP_HOST")|g" \
   -e "s|\${SMTP_PORT}|$(escape "$SMTP_PORT")|g" \
   -e "s|\${SMTP_USER}|$(escape "$SMTP_USER")|g" \
-  -e "s|\${SMTP_PASS}|$(escape "$SMTP_PASS")|g" \
   -e "s|\${SMTP_FROM}|$(escape "$SMTP_FROM")|g" \
   -e "s|\${SMTP_HELLO}|$(escape "$SMTP_HELLO")|g" \
   -e "s|\${SMTP_TLS_SERVERNAME}|$(escape "$SMTP_TLS_SERVERNAME")|g" \
