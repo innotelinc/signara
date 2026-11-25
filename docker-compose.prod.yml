@@ -36,6 +36,8 @@ services:
     ports:
       - '${WEB_BIND_ADDRESS:-127.0.0.1}:${WEB_BIND_PORT:-3000}:3000'
     depends_on:
+      volume-preflight:
+        condition: service_completed_successfully
       api:
         condition: service_healthy
     healthcheck:
@@ -90,6 +92,8 @@ services:
     volumes:
       - ./infra/secrets/smtp_password:/run/secrets/smtp_password:ro
     depends_on:
+      volume-preflight:
+        condition: service_completed_successfully
       migrate:
         condition: service_completed_successfully
       postgres:
@@ -136,6 +140,8 @@ services:
         'packages/database/prisma/schema.prisma',
       ]
     depends_on:
+      volume-preflight:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
     restart: 'no'
@@ -159,6 +165,9 @@ services:
       resources:
         limits:
           memory: 2g
+    depends_on:
+      volume-preflight:
+        condition: service_completed_successfully
     logging: *logging-default
 
   redis:
@@ -177,6 +186,9 @@ services:
       resources:
         limits:
           memory: 512m
+    depends_on:
+      volume-preflight:
+        condition: service_completed_successfully
     logging: *logging-default
 
   minio:
@@ -210,6 +222,9 @@ services:
       resources:
         limits:
           memory: 1g
+    depends_on:
+      volume-preflight:
+        condition: service_completed_successfully
     logging: *logging-default
 
   meilisearch:
@@ -231,6 +246,9 @@ services:
       resources:
         limits:
           memory: 1g
+    depends_on:
+      volume-preflight:
+        condition: service_completed_successfully
     logging: *logging-default
 
   authentik-server:
@@ -254,6 +272,8 @@ services:
     volumes:
       - ./cert:/certs:ro
     depends_on:
+      volume-preflight:
+        condition: service_completed_successfully
       authentik-db:
         condition: service_healthy
       authentik-redis:
@@ -280,6 +300,8 @@ services:
       AUTHENTIK_POSTGRESQL__NAME: authentik
       AUTHENTIK_REDIS__HOST: authentik-redis
     depends_on:
+      volume-preflight:
+        condition: service_completed_successfully
       authentik-db:
         condition: service_healthy
       authentik-redis:
@@ -301,6 +323,9 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    depends_on:
+      volume-preflight:
+        condition: service_completed_successfully
     logging: *logging-default
 
   authentik-redis:
@@ -310,6 +335,9 @@ services:
     command: ['redis-server', '--appendonly', 'yes']
     volumes:
       - authentikredis:/data
+    depends_on:
+      volume-preflight:
+        condition: service_completed_successfully
     logging: *logging-default
 
   prometheus:
@@ -378,6 +406,9 @@ services:
       - alertdata:/alertmanager
     ports:
       - '${ALERTMANAGER_BIND_ADDRESS:-127.0.0.1}:${ALERTMANAGER_BIND_PORT:-9093}:9093'
+    depends_on:
+      volume-preflight:
+        condition: service_completed_successfully
     logging: *logging-default
 
   # --------------------------------------------------------------- backup ---
@@ -418,6 +449,8 @@ services:
       - ./infra/backup:/backup:ro
       - backupcache:/backup-cache
     depends_on:
+      volume-preflight:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       # No `minio` dependency — same reason as the api service above.
@@ -452,7 +485,18 @@ services:
       - ./infra/monitoring/dns_probe.py:/metrics/dns_probe.py:ro
     expose:
       - '9102'
+    depends_on:
+      volume-preflight:
+        condition: service_completed_successfully
     logging: *logging-default
+
+  volume-preflight:
+    image: alpine:3.20
+    restart: 'no'
+    volumes:
+      - /var/lib/docker/volumes:/volumes:ro
+      - /usr/local/bin/volume-preflight.sh:/preflight.sh:ro
+    command: ['sh', '/preflight.sh', '/volumes']
 
 volumes:
   pgdata:
