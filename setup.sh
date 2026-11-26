@@ -29,6 +29,26 @@ fail() { printf '\033[1;31m[signara][error]\033[0m %s\n' "$*" >&2; exit 1; }
 command -v docker >/dev/null 2>&1 || fail "docker is required"
 docker compose version >/dev/null 2>&1 || fail "Docker Compose v2 is required"
 
+# docker-compose.prod.yml runs the volume guard from a *host* path
+# (/usr/local/bin/volume-preflight.sh, bind-mounted read-only into a one-shot
+# container). A host that never had it is not merely unguarded: Docker creates a
+# directory at that path, the bind mount fails to be a file, and every service
+# waiting on `service_completed_successfully` stays down. Install it before the
+# first `up` and refresh it on every deploy so the host copy cannot drift behind
+# the repo. infra/docker/volume-preflight.sh is the source of truth.
+install_volume_preflight() {
+  local src="$SCRIPT_DIR/infra/docker/volume-preflight.sh"
+  local dst=/usr/local/bin/volume-preflight.sh
+  [ -f "$src" ] || fail "$src is missing; the production stack cannot start without the volume guard"
+  if [ ! -w "$(dirname "$dst")" ]; then
+    warn "cannot write $dst (run setup.sh as root) — install the volume guard by hand:"
+    warn "  install -m 0755 $src $dst"
+    return 0
+  fi
+  install -m 0755 "$src" "$dst"
+  log "volume guard installed at $dst"
+}
+
 # Enable the version-controlled commit-guard hooks (.githooks) if this is a
 # git checkout (blocks attribution to anyone but Darnel Hunter).
 if [ -d "$SCRIPT_DIR/.githooks" ] && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
@@ -153,8 +173,18 @@ if [[ "$MODE" == production ]]; then
   docker compose -f docker-compose.prod.yml build backup
   log "Applying production migrations..."
   docker compose -f docker-compose.prod.yml run --rm migrate
+  install_volume_preflight
   log "Starting the production stack..."
   docker compose -f docker-compose.prod.yml up -d --remove-orphans
+  # `up -d` only means the containers were created: the API can be up while the
+  # edge serves 502s, or the web bundle can point at the wrong API host. Gate the
+  # deploy on the path a person takes, and let a failure fail the setup.
+  if [[ "${SIGNARA_SKIP_SMOKE:-0}" == "1" ]]; then
+    warn "SIGNARA_SKIP_SMOKE=1 — deploy not verified"
+  else
+    log "Verifying the deploy (scripts/post-deploy-smoke.sh)..."
+    "$SCRIPT_DIR/scripts/post-deploy-smoke.sh"
+  fi
 else
   if [[ "${WEB_URL:-}" != http://localhost:3000 ]]; then
     warn "WEB_URL is ${WEB_URL:-unset}; local browser requests require WEB_URL=http://localhost:3000"

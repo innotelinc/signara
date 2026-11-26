@@ -8,7 +8,7 @@ SHELL := /bin/bash
 
 .PHONY: help install dev dev-api dev-web build lint test typecheck \
         db-generate db-migrate db-seed db-studio \
-        up up-dev up-prod down logs ps \
+        up up-dev up-prod deploy down logs ps \
         backup backup-now restore \
         nginx-hosts nginx-cert \
         cerulean-provision check-commits smoke \
@@ -68,6 +68,10 @@ up-dev: up ## Alias for `make up`
 
 up-prod: ## Start the production stack (docker-compose.prod.yml)
 	docker compose -f docker-compose.prod.yml up -d --build
+
+deploy: ## Deploy the production stack, then fail if the smoke check does
+	docker compose -f docker-compose.prod.yml up -d --build
+	./scripts/post-deploy-smoke.sh
 
 down: ## Stop and remove all services (keeps volumes)
 	docker compose -f docker-compose.dev.yml down
