@@ -29,7 +29,11 @@
 #
 # A container whose healthcheck is still `starting` is left alone, so a slow
 # boot is not punished. Afterwards it asserts the stack answers: postgres via
-# `pg_isready`, the API via `/ready`.
+# `pg_isready`, the API via `/ready`, the web app by fetching its HTML, and then
+# the same local `scripts/post-deploy-smoke.sh` the deploy gate runs — so
+# "healed" and "deployed" mean one thing instead of two. Public hosts are
+# excluded: the edge and NPM live outside this container, and a heal cannot
+# repair them, so paging on them here would report someone else's outage.
 #
 # What it never does
 # ------------------
@@ -300,6 +304,18 @@ wait_for() {
 
 pg_probe() { docker exec "$(cname postgres)" pg_isready -q -U "$(pg_user || echo signara)" >/dev/null 2>&1; }
 api_probe() { docker exec "$(cname api)" wget -qO- http://127.0.0.1:8000/ready >/dev/null 2>&1; }
+# The previous version stopped at postgres and the API and then logged
+# "frontend serving" without ever asking it: the web app could be down while the
+# journal said the heal had worked. Probe what the line claims.
+frontend_probe() { docker exec "$(cname frontend)" wget -qO- http://127.0.0.1:3000/ 2>/dev/null | grep -qi '<html'; }
+
+# The deploy gate's own checks, run locally. Healthchecks can pass while the
+# stack is not what was deployed — a restart count above zero, or the API not
+# answering on the port compose actually published. Keeping one definition of
+# green also means a heal that "succeeds" here cannot be contradicted by the
+# next `make deploy`.
+SMOKE_LOG=/tmp/signara-self-heal-smoke.log
+smoke_probe() { SMOKE_PUBLIC=0 bash "$COMPOSE_DIR/scripts/post-deploy-smoke.sh" >"$SMOKE_LOG" 2>&1; }
 
 if [ "$broken" -eq 1 ] && [ "$MODE" = repair ]; then
   # The repairs above are asynchronous; give them the same patience the
@@ -309,13 +325,21 @@ fi
 
 wait_for postgres 20 pg_probe || broken=1
 wait_for api 20 api_probe || broken=1
+wait_for frontend 10 frontend_probe || broken=1
+# Only once the containers above answer: the smoke check waits on health itself
+# and is mostly noise while a recreate is still in its start period.
+if [ "$broken" -eq 0 ]; then
+  wait_for smoke 5 smoke_probe || broken=1
+fi
 
 if [ "$broken" -eq 1 ]; then
-  log "NOT SERVING: postgres=$(health_of "$(cname postgres)") api=$(health_of "$(cname api)")"
+  # The failing checks are the useful part of the log; the passes are not.
+  [ -s "$SMOKE_LOG" ] && grep -E 'FAIL|^smoke:' "$SMOKE_LOG" | tail -20
+  log "NOT SERVING: postgres=$(health_of "$(cname postgres)") api=$(health_of "$(cname api)") frontend=$(health_of "$(cname frontend)")"
   exit 1
 fi
 
 # A heal that changed nothing still gets one line, so the journal proves the
 # timer is running rather than leaving a silent unit to be trusted on faith.
-log "ok: postgres, api and frontend serving"
+log "ok: postgres, api and frontend serving (local smoke passed)"
 exit 0

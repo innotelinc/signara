@@ -92,10 +92,20 @@ Verified on 2026-11-18 after the change:
 
 It walks dependencies first (`postgres`, `redis`, `meilisearch`, `migrate`,
 `api`, `frontend`, then the monitoring services), then **asserts** readiness
-rather than trusting health status: `pg_isready` inside the postgres container
-and `/ready` inside the API. It exits non-zero if either still fails, so a heal
-that did not work is a failed unit in `systemctl --failed`, not a quiet line in
-a log.
+rather than trusting health status: `pg_isready` inside the postgres container,
+`/ready` inside the API, and the web app's HTML from `frontend`. Earlier
+versions stopped after the API and still logged "frontend serving" without
+asking it, which is the class of claim this page exists to avoid.
+
+It finishes on `SMOKE_PUBLIC=0 scripts/post-deploy-smoke.sh` — the deploy gate's
+own local checks, including restart counts and the port compose actually
+published — so "healed" and "deployed" mean the same thing and a heal cannot be
+contradicted by the next deploy. Public hostnames are excluded deliberately: the
+edge and NGINX Proxy Manager live outside this container, and a heal cannot
+repair them, so failing on them here would page for someone else's outage.
+
+It exits non-zero if any of that still fails, so a heal that did not work is a
+failed unit in `systemctl --failed`, not a quiet line in a log.
 
 It never runs `docker compose down`, never passes `--volumes`, and never
 recreates a healthy container. A heal is a restart; no data is touched.
