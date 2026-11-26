@@ -11,7 +11,7 @@ SHELL := /bin/bash
         up up-dev up-prod down logs ps \
         backup backup-now restore \
         nginx-hosts nginx-cert \
-        cerulean-provision check-commits \
+        cerulean-provision check-commits smoke \
         release docs
 
 help: ## Show this help message
@@ -77,6 +77,9 @@ logs: ## Tail logs from all services
 
 ps: ## List service status
 	docker compose -f docker-compose.dev.yml ps
+
+smoke: ## Post-deploy smoke check: containers, API readiness, web, public hosts
+	./scripts/post-deploy-smoke.sh
 
 ## ---- Backup / Restore ----------------------------------------------------
 
